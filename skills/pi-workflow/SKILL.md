@@ -14,6 +14,10 @@ Use this skill for coding tasks in this repository.
 
 When the task spans multiple files or changes behavior, first produce a short numbered plan. Do not begin implementation until the user confirms, unless the user explicitly asks for direct execution.
 
+## Understanding external open-source projects
+
+When a task depends on understanding an open-source project that is not present in the local repository, use DeepWiki first when it is available to get a high-level overview of the project's architecture, modules, and relevant symbols. Treat DeepWiki as an orientation aid, not the source of truth: verify important claims against the project's source code, official documentation, tests, and version or commit in scope. Do not use it for private or sensitive repositories.
+
 ## Single-repository code exploration
 
 Use an evidence-first retrieval loop before changing code. Keep the search local and prefer open-source tools that can run without uploading repository contents.
