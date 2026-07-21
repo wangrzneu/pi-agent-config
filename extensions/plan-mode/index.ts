@@ -3,6 +3,7 @@ import { isSafeCommand, extractPlan } from "./utils.ts";
 
 export default function planMode(pi: ExtensionAPI) {
   let enabled = false;
+  let needsReminder = false;
   let plan: string[] = [];
 
   pi.registerFlag("plan", {
@@ -13,6 +14,7 @@ export default function planMode(pi: ExtensionAPI) {
 
   const setMode = (value: boolean, ctx: any) => {
     enabled = value;
+    needsReminder = value;
     if (enabled) {
       pi.setActiveTools(["read", "bash", "grep", "find", "ls"]);
       ctx.ui.notify("Plan mode enabled: write tools are disabled.", "info");
@@ -42,17 +44,13 @@ export default function planMode(pi: ExtensionAPI) {
   });
 
   pi.on("before_agent_start", async () => {
-    if (!enabled) return;
+    if (!enabled || !needsReminder) return;
+    needsReminder = false;
     return {
       message: {
         customType: "pi-agent-config-plan-mode",
         display: false,
-        content: [
-          "[PLAN MODE ACTIVE]",
-          "You are in read-only planning mode.",
-          "Inspect the repository, but do not modify files or run mutating commands.",
-          "Return a detailed numbered plan under a `Plan:` heading.",
-        ].join("\n"),
+        content: "[PLAN] Read-only. Inspect only; return a numbered plan under Plan:.",
       },
     };
   });
