@@ -1,9 +1,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isSafeCommand, extractPlan } from "./utils.ts";
 
+const PLAN_TOOL_NAMES = new Set(["read", "bash", "grep", "find", "ls"]);
+
 export default function planMode(pi: ExtensionAPI) {
   let enabled = false;
   let needsReminder = false;
+  let previousActiveTools: string[] | undefined;
   let plan: string[] = [];
 
   pi.registerFlag("plan", {
@@ -13,15 +16,20 @@ export default function planMode(pi: ExtensionAPI) {
   });
 
   const setMode = (value: boolean, ctx: any) => {
+    if (value === enabled) return;
+
     enabled = value;
     needsReminder = value;
     if (enabled) {
-      pi.setActiveTools(["read", "bash", "grep", "find", "ls"]);
+      previousActiveTools = pi.getActiveTools();
+      pi.setActiveTools(previousActiveTools.filter((name) => PLAN_TOOL_NAMES.has(name)));
       ctx.ui.notify("Plan mode enabled: write tools are disabled.", "info");
       ctx.ui.setStatus("plan-mode", ctx.ui.theme.fg("warning", " plan"));
     } else {
-      pi.setActiveTools(["read", "bash", "edit", "write", "grep", "find", "ls"]);
-      ctx.ui.notify("Plan mode disabled: full tools restored.", "info");
+      const toolsToRestore = previousActiveTools;
+      previousActiveTools = undefined;
+      if (toolsToRestore) pi.setActiveTools(toolsToRestore);
+      ctx.ui.notify("Plan mode disabled: previous tools restored.", "info");
       ctx.ui.setStatus("plan-mode", undefined);
     }
   };
