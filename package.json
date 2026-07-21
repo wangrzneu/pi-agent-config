@@ -3,6 +3,9 @@
   "private": true,
   "description": "Personal Pi Coding Agent extensions, skills, and workflow settings",
   "keywords": ["pi-package", "pi-coding-agent", "agent-config"],
+  "scripts": {
+    "test": "node --experimental-strip-types --test extensions/plan-mode/index.test.mjs"
+  },
   "pi": {
     "extensions": ["extensions"],
     "skills": ["skills"],
