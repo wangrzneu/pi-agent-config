@@ -1,0 +1,11 @@
+{
+  "name": "pi-agent-config",
+  "private": true,
+  "description": "Personal Pi Coding Agent extensions, skills, and workflow settings",
+  "keywords": ["pi-package", "pi-coding-agent", "agent-config"],
+  "pi": {
+    "extensions": ["extensions"],
+    "skills": ["skills"],
+    "prompts": ["prompts"]
+  }
+}

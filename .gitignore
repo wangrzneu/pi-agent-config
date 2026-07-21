@@ -1,0 +1,5 @@
+.DS_Store
+.env
+.pi/
+node_modules/
+dist/
