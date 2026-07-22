@@ -4,7 +4,7 @@
   "description": "Personal Pi Coding Agent extensions, skills, and workflow settings",
   "keywords": ["pi-package", "pi-coding-agent", "agent-config"],
   "scripts": {
-    "test": "node --experimental-strip-types --test extensions/plan-mode/index.test.mjs"
+    "test": "node --experimental-strip-types --test extensions/plan-mode/index.test.mjs tests/skill-metadata.test.mjs"
   },
   "pi": {
     "extensions": ["extensions"],
