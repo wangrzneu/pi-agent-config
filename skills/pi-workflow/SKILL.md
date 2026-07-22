@@ -1,3 +1,8 @@
+---
+name: pi-workflow
+description: Guides concise, evidence-first coding work with focused planning, verification, and safe handling. Use for repository coding tasks.
+---
+
 # Pi Workflow
 
 - Inspect before editing.
