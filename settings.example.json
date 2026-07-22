@@ -1,5 +1,4 @@
 {
-  "$schema": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/settings.schema.json",
   "packages": [
     "git:github.com/wangrzneu/pi-agent-config"
   ]
