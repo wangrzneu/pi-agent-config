@@ -48,9 +48,11 @@ pi install -l git:github.com/wangrzneu/pi-agent-config
 
 ### 本地目录
 
-开发或使用本地检出版本：
+开发或使用本地检出版本时，先安装 Mermaid 渲染依赖：
 
 ```bash
+cd /absolute/path/to/pi-agent-config
+npm install
 pi install -l /absolute/path/to/pi-agent-config
 ```
 
@@ -77,7 +79,17 @@ pi
 ```
 
 阅读器支持方向键、`j`/`k` 滚动，`PageUp`/`PageDown` 翻页，`g`/`G`
-跳转首尾，并使用 `q` 或 `Esc` 关闭。
+跳转首尾，并使用 `q` 或 `Esc` 关闭。其他功能：
+
+- `/` 输入正文搜索，`n`/`N` 跳转到下一个或上一个结果。
+- `d` 打开目录导航，只列出目录和 Markdown 文件。
+- `l` 或 `o` 打开链接列表；本地 Markdown 链接在阅读器内跳转，其他链接交给系统打开。
+- 自动渲染本地、HTTP(S) 和 data URL 中的 PNG、JPEG、GIF、WebP 图片；终端不支持图片协议时显示图片信息。
+- 将 `mermaid` 代码块本地渲染为 Unicode 图表，不调用远程渲染服务。
+- `r` 手动刷新；文件变化后也会自动刷新。
+
+每份文档最多渲染 32 张图片，每张最多 8 MiB，远程图片请求 8 秒超时。远程图片会产生网络请求；不要用阅读器
+打开包含不可信跟踪图片的文档。
 
 可以运行以下命令验证仓库中的回归测试：
 
@@ -105,7 +117,7 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
 - `prompts/` 中的模板只在对应任务中按需使用。
 - `docs/` 是参考材料，不应自动加入每次任务的上下文。
 - plan mode 的模型提醒只在进入模式后注入一次；只读限制由工具拦截器持续执行。
-- Markdown 阅读器只在本地 TUI 中渲染文件，不会把内容加入模型上下文。
+- Markdown 阅读器、目录、搜索、图片和 Mermaid 都只在 TUI 扩展进程中处理，不会把内容加入模型上下文。
 
 ## 设计原则
 

@@ -14,6 +14,11 @@ export class ScrollState {
     this.clamp();
   }
 
+  moveTo(line: number): void {
+    this.offset = line;
+    this.clamp();
+  }
+
   movePage(pages: number): void {
     this.move(pages * Math.max(1, this.viewportLines - 1));
   }

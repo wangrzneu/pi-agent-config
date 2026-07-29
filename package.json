@@ -3,13 +3,30 @@
   "private": true,
   "type": "module",
   "description": "Personal Pi Coding Agent extensions, skills, and workflow settings",
-  "keywords": ["pi-package", "pi-coding-agent", "agent-config"],
+  "keywords": [
+    "pi-package",
+    "pi-coding-agent",
+    "agent-config"
+  ],
   "scripts": {
     "test": "node --experimental-strip-types --test extensions/plan-mode/index.test.mjs extensions/markdown-viewer/*.test.mjs tests/skill-metadata.test.mjs"
   },
   "pi": {
-    "extensions": ["extensions"],
-    "skills": ["skills"],
-    "prompts": ["prompts"]
+    "extensions": [
+      "extensions"
+    ],
+    "skills": [
+      "skills"
+    ],
+    "prompts": [
+      "prompts"
+    ]
+  },
+  "dependencies": {
+    "beautiful-mermaid": "^1.1.3"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
   }
 }

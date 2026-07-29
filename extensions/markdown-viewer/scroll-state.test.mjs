@@ -29,6 +29,17 @@ test("moves by a page with one line of overlap", () => {
   assert.equal(scroll.start, 0);
 });
 
+test("moves directly to a requested line and clamps it", () => {
+  const scroll = new ScrollState();
+  scroll.update(10, 4);
+
+  scroll.moveTo(5);
+  assert.equal(scroll.start, 5);
+
+  scroll.moveTo(100);
+  assert.equal(scroll.start, 6);
+});
+
 test("supports start, end, resize, and empty content", () => {
   const scroll = new ScrollState();
   scroll.update(12, 4);

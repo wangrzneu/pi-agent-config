@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { loadMarkdownFile, MarkdownFileError } from "./markdown-loader.ts";
+import { DocumentWorkspace } from "./document-workspace.ts";
+import { MarkdownFileError } from "./markdown-loader.ts";
 import { MarkdownViewer } from "./markdown-viewer.ts";
 
 async function openMarkdown(argument: string, ctx: ExtensionCommandContext): Promise<void> {
@@ -10,9 +11,10 @@ async function openMarkdown(argument: string, ctx: ExtensionCommandContext): Pro
     return;
   }
 
-  let file;
+  const workspace = new DocumentWorkspace();
+  let document;
   try {
-    file = await loadMarkdownFile(argument, ctx.cwd);
+    document = await workspace.open(argument, ctx.cwd);
   } catch (error) {
     const message =
       error instanceof MarkdownFileError ? error.message : "Unable to open the Markdown file.";
@@ -21,7 +23,7 @@ async function openMarkdown(argument: string, ctx: ExtensionCommandContext): Pro
   }
 
   await ctx.ui.custom<void>((tui, theme, _keybindings, done) => {
-    return new MarkdownViewer(tui, theme, file.path, file.content, () => done());
+    return new MarkdownViewer(tui, theme, workspace, document, () => done());
   });
 }
 
