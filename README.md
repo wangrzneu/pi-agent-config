@@ -1,54 +1,56 @@
 # pi-agent-config
 
-个人维护的 Pi Coding Agent 配置、扩展与工作流。
+English | [简体中文](README.zh-CN.md)
 
-## 内容
+A personally maintained collection of configurations, extensions, and workflows for Pi Coding Agent.
 
-- `extensions/plan-mode/`：只读规划模式
-- `extensions/markdown-viewer/`：在 Pi TUI 中打开并渲染本地 Markdown 文件
-- `skills/pi-workflow/`：精简的默认工作规范
-- `prompts/`：按需使用的 review、debugging 和 architecture 提示词
-- `docs/`：代码探索、外部项目和安全边界参考文档
-- `settings.example.json`：项目级 Pi package 配置示例
+## Contents
 
-## 前置条件
+- `extensions/plan-mode/`: read-only planning mode
+- `extensions/markdown-viewer/`: open and render local Markdown files in the Pi TUI
+- `skills/pi-workflow/`: concise default working guidelines
+- `prompts/`: on-demand prompts for review, debugging, and architecture tasks
+- `docs/`: reference documentation for code exploration, external projects, and security boundaries
+- `settings.example.json`: example project-level Pi package configuration
 
-需要 Node.js 22.19.0 或更高版本。安装 Pi：
+## Prerequisites
+
+Node.js 22.19.0 or later is required. Install Pi:
 
 ```bash
 npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 ```
 
-确认环境：
+Verify the environment:
 
 ```bash
 node --version
 pi --version
 ```
 
-## 安装
+## Installation
 
-### 全局安装
+### Global installation
 
-安装后对所有项目生效：
+Install once to make the package available to all projects:
 
 ```bash
 pi install git:github.com/wangrzneu/pi-agent-config
 ```
 
-### 项目安装
+### Project installation
 
-在目标项目目录执行，配置会写入 `.pi/settings.json`：
+Run this in the target project directory. The configuration is written to `.pi/settings.json`:
 
 ```bash
 pi install -l git:github.com/wangrzneu/pi-agent-config
 ```
 
-也可以把 `settings.example.json` 的内容合并到项目的 `.pi/settings.json`。
+You can also merge the contents of `settings.example.json` into the project's `.pi/settings.json`.
 
-### 本地目录
+### Local directory
 
-开发或使用本地检出版本时，先安装 Mermaid 渲染依赖：
+When developing or using a local checkout, install the Mermaid rendering dependency first:
 
 ```bash
 cd /absolute/path/to/pi-agent-config
@@ -56,48 +58,49 @@ npm install
 pi install -l /absolute/path/to/pi-agent-config
 ```
 
-只在当前运行中临时加载整个 package：
+Temporarily load the entire package for the current run only:
 
 ```bash
 pi -e /absolute/path/to/pi-agent-config
 ```
 
-## 验证
+## Verification
 
 ```bash
 pi list
 pi
 ```
 
-启动后使用 `/plan` 切换规划模式。
+After Pi starts, use `/plan` to toggle planning mode.
 
-使用 `/md <path>` 或 `/markdown <path>` 打开本地 `.md`、`.markdown` 文件：
+Use `/md <path>` or `/markdown <path>` to open a local `.md` or `.markdown` file:
 
 ```text
 /md README.md
 /md "docs/design notes.md"
 ```
 
-阅读器支持方向键、`j`/`k` 滚动，`PageUp`/`PageDown` 翻页，`g`/`G`
-跳转首尾，并使用 `q` 或 `Esc` 关闭。其他功能：
+The viewer supports the arrow keys and `j`/`k` for scrolling, `PageUp`/`PageDown` for paging,
+`g`/`G` to jump to the beginning or end, and `q` or `Esc` to close. Additional features:
 
-- `/` 输入正文搜索，`n`/`N` 跳转到下一个或上一个结果。
-- `d` 打开目录导航，只列出目录和 Markdown 文件。
-- `l` 或 `o` 打开链接列表；本地 Markdown 链接在阅读器内跳转，其他链接交给系统打开。
-- 自动渲染本地、HTTP(S) 和 data URL 中的 PNG、JPEG、GIF、WebP 图片；终端不支持图片协议时显示图片信息。
-- 将 `mermaid` 代码块本地渲染为 Unicode 图表，不调用远程渲染服务。
-- `r` 手动刷新；文件变化后也会自动刷新。
+- Press `/` to search the document, then use `n`/`N` to jump to the next or previous result.
+- Press `d` to open directory navigation, which lists directories and Markdown files only.
+- Press `l` or `o` to open the link list. Local Markdown links open inside the viewer; other links open with the system handler.
+- Automatically render PNG, JPEG, GIF, and WebP images from local files, HTTP(S), and data URLs. Image details are shown when the terminal does not support an image protocol.
+- Render `mermaid` code blocks locally as Unicode diagrams without using a remote rendering service.
+- Press `r` to refresh manually; the viewer also refreshes automatically when the file changes.
 
-每份文档最多渲染 32 张图片，每张最多 8 MiB，远程图片请求 8 秒超时。远程图片会产生网络请求；不要用阅读器
-打开包含不可信跟踪图片的文档。
+Each document can render up to 32 images, with a maximum size of 8 MiB per image and an 8-second
+timeout for remote image requests. Remote images generate network requests; do not use the viewer
+to open documents containing untrusted tracking images.
 
-可以运行以下命令验证仓库中的回归测试：
+Run the repository regression tests with:
 
 ```bash
 npm test
 ```
 
-## 更新与移除
+## Updating and Removing
 
 ```bash
 pi update --extensions
@@ -105,27 +108,30 @@ pi update git:github.com/wangrzneu/pi-agent-config
 pi remove git:github.com/wangrzneu/pi-agent-config
 ```
 
-如果使用项目级安装，移除时增加 `-l`：
+For a project-level installation, add `-l` when removing:
 
 ```bash
 pi remove -l git:github.com/wangrzneu/pi-agent-config
 ```
 
-## Token 使用
+## Token Usage
 
-- 默认只加载精简的 `skills/pi-workflow/SKILL.md`。
-- `prompts/` 中的模板只在对应任务中按需使用。
-- `docs/` 是参考材料，不应自动加入每次任务的上下文。
-- plan mode 的模型提醒只在进入模式后注入一次；只读限制由工具拦截器持续执行。
-- Markdown 阅读器、目录、搜索、图片和 Mermaid 都只在 TUI 扩展进程中处理，不会把内容加入模型上下文。
+- Only the concise `skills/pi-workflow/SKILL.md` is loaded by default.
+- Templates in `prompts/` are loaded on demand for relevant tasks.
+- Files in `docs/` are reference material and should not be added to every task's context automatically.
+- Plan mode injects its model reminder only once when the mode is entered; tool interceptors continuously enforce the read-only restrictions.
+- The Markdown viewer, directory navigation, search, images, and Mermaid rendering are processed only inside the TUI extension and do not add content to the model context.
 
-## 设计原则
+## Design Principles
 
-1. 规划阶段默认只读。
-2. 硬约束放在扩展的工具拦截器中，行为偏好放在 skill 或按需 prompt 中。
-3. 详细流程放在文档中，避免增加默认上下文。
-4. 配置保持可移植，不绑定单一模型或 provider。
+1. Planning is read-only by default.
+2. Put hard constraints in extension tool interceptors, and behavior preferences in skills or on-demand prompts.
+3. Keep detailed workflows in documentation to avoid increasing the default context.
+4. Keep the configuration portable and independent of any single model or provider.
 
-## 安全提醒
+## Security
 
-Plan mode 是防误操作机制，不是安全沙箱。Pi package 和扩展可以执行任意代码；安装前请审查源码，处理真实凭据、生产代码或不可信项目时应使用容器或专用低权限用户。详见 `docs/security.md`。
+Plan mode is a safeguard against accidental changes, not a security sandbox. Pi packages and
+extensions can execute arbitrary code. Review the source before installation, and use a container
+or a dedicated low-privilege user when working with real credentials, production code, or
+untrusted projects. See [`docs/security.md`](docs/security.md) for details.
