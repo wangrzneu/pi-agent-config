@@ -14,6 +14,7 @@ description: Guides concise, evidence-first coding work with focused planning, v
 - Summarize changed files, checks, and remaining risks.
 - Never expose secrets.
 - Call out changes to credentials, lock files, or deployment configuration.
+- Before every `git push`, obtain the user's explicit authorization for that specific push. Do not treat commit approval, prior push approval, or tool permission as authorization.
 - Keep final responses concise unless detail is requested.
 
 Detailed exploration guidance belongs in task-specific documentation, not the default skill.
