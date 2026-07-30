@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import planMode from "./index.ts";
+import { isPlanModeActive } from "../work-status/plan-mode-state.ts";
 
 function createHarness(initialTools) {
   let activeTools = [...initialTools];
@@ -55,9 +56,11 @@ test("plan mode restores the exact active tool set from before entry", async () 
 
   await harness.togglePlan();
   assert.deepEqual(harness.getActiveTools(), ["read", "bash"]);
+  assert.equal(isPlanModeActive(), true);
 
   await harness.togglePlan();
   assert.deepEqual(harness.getActiveTools(), ["read", "bash", "custom-search"]);
+  assert.equal(isPlanModeActive(), false);
 });
 
 test("each plan mode entry captures a fresh tool snapshot", async () => {

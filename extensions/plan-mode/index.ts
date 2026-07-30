@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { setPlanModeActive } from "../work-status/plan-mode-state.ts";
 import { isSafeCommand, extractPlan } from "./utils.ts";
 
 const PLAN_TOOL_NAMES = new Set(["read", "bash", "grep", "find", "ls"]);
@@ -19,6 +20,7 @@ export default function planMode(pi: ExtensionAPI) {
     if (value === enabled) return;
 
     enabled = value;
+    setPlanModeActive(value);
     needsReminder = value;
     if (enabled) {
       previousActiveTools = pi.getActiveTools();
@@ -83,5 +85,9 @@ export default function planMode(pi: ExtensionAPI) {
       .join("\n");
     const extracted = extractPlan(text);
     if (extracted.length > 0) plan = extracted;
+  });
+
+  pi.on("session_shutdown", async () => {
+    setPlanModeActive(false);
   });
 }

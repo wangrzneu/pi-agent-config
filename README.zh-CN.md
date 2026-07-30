@@ -8,6 +8,7 @@
 
 - `extensions/plan-mode/`：只读规划模式
 - `extensions/markdown-viewer/`：在 Pi TUI 中打开并渲染本地 Markdown 文件
+- `extensions/work-status/`：在 Pi TUI 中显示当前任务和工作类型
 - `skills/pi-workflow/`：精简的默认工作规范
 - `prompts/`：按需使用的 review、debugging 和 architecture 提示词
 - `docs/`：代码探索、外部项目和安全边界参考文档
@@ -73,6 +74,10 @@ pi
 
 启动后使用 `/plan` 切换规划模式。
 
+Agent 运行时，页脚会显示当前任务摘要及工作类型：设计、计划、实现、测试、评审、修复或探索。
+执行编辑、测试、查看差异等高信号工具时，工作提示会同步显示当前阶段。类型识别完全在本地完成，
+不会向模型上下文添加消息或指令。
+
 使用 `/md <path>` 或 `/markdown <path>` 打开本地 `.md`、`.markdown` 文件：
 
 ```text
@@ -119,6 +124,7 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
 - `prompts/` 中的模板只在对应任务中按需使用。
 - `docs/` 是参考材料，不应自动加入每次任务的上下文。
 - plan mode 的模型提醒只在进入模式后注入一次；只读限制由工具拦截器持续执行。
+- 工作状态的类型识别和显示只在 TUI 本地运行，不增加模型上下文。
 - Markdown 阅读器、目录、搜索、图片和 Mermaid 都只在 TUI 扩展进程中处理，不会把内容加入模型上下文。
 
 ## 设计原则
