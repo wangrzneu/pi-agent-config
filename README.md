@@ -75,9 +75,10 @@ pi
 After Pi starts, use `/plan` to toggle planning mode.
 
 While the agent is running, the footer shows a compact summary of the current task and its type:
-Design, Plan, Implement, Test, Review, Fix, or Explore. The working message follows high-signal
-tool activity such as editing, running tests, and reviewing a diff. Classification runs locally
-and does not add messages or instructions to the model context.
+Design, Plan, Implement, Test, Review, Fix, or Explore. The selected model performs one short
+classification request with extended thinking disabled, while the working message shows the
+active tool detail. Invalid, failed, or timed-out classifications are omitted without a fallback
+status. Classification results are not added to the session or main model context.
 
 Use `/md <path>` or `/markdown <path>` to open a local `.md` or `.markdown` file:
 
@@ -126,7 +127,7 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
 - Templates in `prompts/` are loaded on demand for relevant tasks.
 - Files in `docs/` are reference material and should not be added to every task's context automatically.
 - Plan mode injects its model reminder only once when the mode is entered; tool interceptors continuously enforce the read-only restrictions.
-- Work status classification and display run locally in the TUI without adding model context.
+- Work status uses one short, no-reasoning model request for each uncached task. It consumes a small number of tokens but does not add the result to the session context.
 - The Markdown viewer, directory navigation, search, images, and Mermaid rendering are processed only inside the TUI extension and do not add content to the model context.
 
 ## Design Principles

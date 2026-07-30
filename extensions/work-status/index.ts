@@ -1,11 +1,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  classifyWorkWithModel,
+  type WorkClassification,
+} from "./model-classifier.ts";
 import { isPlanModeActive } from "./plan-mode-state.ts";
 import {
   WORK_TYPE_LABELS,
-  classifyToolActivity,
-  classifyWork,
   describeToolActivity,
-  summarizeWork,
   type WorkActivity,
   type WorkType,
 } from "./work-status.ts";
@@ -26,14 +27,23 @@ interface CurrentWork {
   summary: string;
 }
 
+type ClassifyWork = typeof classifyWorkWithModel;
+
 export default function workStatus(pi: ExtensionAPI) {
+  registerWorkStatus(pi, classifyWorkWithModel);
+}
+
+export function registerWorkStatus(
+  pi: ExtensionAPI,
+  classifyWork: ClassifyWork,
+) {
   let current: CurrentWork | undefined;
   const activeTools = new Map<string, WorkActivity>();
 
   const render = (ctx: any, activity?: WorkActivity) => {
     if (!ctx.hasUI || !current) return;
 
-    const type = activity?.type ?? current.type;
+    const type = current.type;
     const label = WORK_TYPE_LABELS[type];
     const status =
       ctx.ui.theme.fg(TYPE_COLORS[type], ` ${label}`) +
@@ -54,12 +64,18 @@ export default function workStatus(pi: ExtensionAPI) {
   };
 
   pi.on("before_agent_start", async (event, ctx) => {
+    clear(ctx);
+    if (ctx.mode !== "tui") return;
+
     const prompt = String(event.prompt ?? "");
+    const classification: WorkClassification | undefined =
+      await classifyWork(prompt, ctx);
+    if (!classification) return;
+
     current = {
-      type: isPlanModeActive() ? "plan" : classifyWork(prompt),
-      summary: summarizeWork(prompt),
+      type: isPlanModeActive() ? "plan" : classification.type,
+      summary: classification.summary,
     };
-    activeTools.clear();
     render(ctx);
   });
 
@@ -68,7 +84,6 @@ export default function workStatus(pi: ExtensionAPI) {
 
     const args = (event.args ?? {}) as Record<string, unknown>;
     const activity = {
-      type: classifyToolActivity(event.toolName, args, current.type),
       detail: describeToolActivity(event.toolName, args),
     };
     activeTools.set(event.toolCallId, activity);

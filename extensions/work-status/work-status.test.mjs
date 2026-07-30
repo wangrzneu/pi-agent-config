@@ -1,22 +1,50 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import workStatus from "./index.ts";
+import { registerWorkStatus } from "./index.ts";
+import {
+  classifyWorkWithModel,
+  parseClassification,
+} from "./model-classifier.ts";
 import { setPlanModeActive } from "./plan-mode-state.ts";
 import {
-  classifyToolActivity,
-  classifyWork,
   describeToolActivity,
   summarizeWork,
 } from "./work-status.ts";
 
-test("classifies common work types in Chinese and English", () => {
-  assert.equal(classifyWork("设计一个新的 API"), "design");
-  assert.equal(classifyWork("先给出实现计划"), "plan");
-  assert.equal(classifyWork("Add directory navigation"), "implement");
-  assert.equal(classifyWork("运行回归测试"), "test");
-  assert.equal(classifyWork("Review the current branch"), "review");
-  assert.equal(classifyWork("修复启动失败问题"), "fix");
-  assert.equal(classifyWork("了解这个仓库"), "explore");
+test("accepts only a strict successful model classification", () => {
+  assert.deepEqual(
+    parseClassification({
+      stopReason: "stop",
+      content: [
+        {
+          type: "text",
+          text: '{"type":"design","summary":"设计新的 API"}',
+        },
+      ],
+    }),
+    { type: "design", summary: "设计新的 API" },
+  );
+  assert.equal(
+    parseClassification({
+      stopReason: "stop",
+      content: [{ type: "text", text: "```json\n{}\n```" }],
+    }),
+    undefined,
+  );
+  assert.equal(
+    parseClassification({
+      stopReason: "stop",
+      content: [{ type: "text", text: '{"type":"unknown","summary":"Task"}' }],
+    }),
+    undefined,
+  );
+  assert.equal(
+    parseClassification({
+      stopReason: "length",
+      content: [{ type: "text", text: '{"type":"test","summary":"Test"}' }],
+    }),
+    undefined,
+  );
 });
 
 test("summarizes prompts without leaking multiline or fenced details into the footer", () => {
@@ -28,14 +56,6 @@ test("summarizes prompts without leaking multiline or fenced details into the fo
   assert.equal(summarizeWork("   "), "Current task");
 });
 
-test("uses high-signal tools to update the current phase", () => {
-  assert.equal(classifyToolActivity("edit", { path: "index.ts" }, "design"), "implement");
-  assert.equal(classifyToolActivity("edit", { path: "index.ts" }, "fix"), "fix");
-  assert.equal(classifyToolActivity("bash", { command: "npm test" }, "implement"), "test");
-  assert.equal(classifyToolActivity("bash", { command: "git diff --check" }, "implement"), "review");
-  assert.equal(classifyToolActivity("read", { path: "index.ts" }, "plan"), "plan");
-});
-
 test("describes tool activity with compact useful details", () => {
   assert.equal(
     describeToolActivity("read", { path: "/workspace/extensions/work-status/index.ts" }),
@@ -45,7 +65,13 @@ test("describes tool activity with compact useful details", () => {
   assert.equal(describeToolActivity("custom_tool", {}), "Running custom tool");
 });
 
-function createHarness() {
+function createHarness(
+  classifyWork = async (prompt) => ({
+    type: "implement",
+    summary: prompt,
+  }),
+  mode = "tui",
+) {
   const handlers = new Map();
   const statuses = [];
   const workingMessages = [];
@@ -56,7 +82,8 @@ function createHarness() {
     },
   };
   const ctx = {
-    hasUI: true,
+    mode,
+    hasUI: mode === "tui",
     ui: {
       setStatus(key, text) {
         statuses.push([key, text]);
@@ -72,7 +99,7 @@ function createHarness() {
     },
   };
 
-  workStatus(pi);
+  registerWorkStatus(pi, classifyWork);
 
   return {
     statuses,
@@ -83,7 +110,7 @@ function createHarness() {
   };
 }
 
-test("shows task type and content, follows tool phases, then clears when settled", async () => {
+test("shows model type and content, follows tool details, then clears when settled", async () => {
   const harness = createHarness();
 
   await harness.emit("before_agent_start", { prompt: "优化 TUI 状态显示" });
@@ -98,8 +125,8 @@ test("shows task type and content, follows tool phases, then clears when settled
     toolName: "bash",
     args: { command: "npm test" },
   });
-  assert.match(harness.statuses.at(-1)[1], / Test · 优化 TUI 状态显示$/);
-  assert.equal(harness.workingMessages.at(-1), "Test · npm test");
+  assert.match(harness.statuses.at(-1)[1], / Implement · 优化 TUI 状态显示$/);
+  assert.equal(harness.workingMessages.at(-1), "Implement · npm test");
 
   await harness.emit("tool_execution_end", { toolCallId: "test-1" });
   assert.match(harness.statuses.at(-1)[1], / Implement · 优化 TUI 状态显示$/);
@@ -138,4 +165,120 @@ test("shows Plan while read-only plan mode is active", async () => {
   } finally {
     setPlanModeActive(false);
   }
+});
+
+test("shows nothing when model classification fails", async () => {
+  const harness = createHarness(async () => undefined);
+
+  await harness.emit("before_agent_start", { prompt: "实现新的状态扩展" });
+
+  assert.equal(
+    harness.statuses.some(([, text]) => text !== undefined),
+    false,
+  );
+  assert.equal(
+    harness.workingMessages.some((message) => message !== undefined),
+    false,
+  );
+});
+
+test("does not classify outside TUI mode", async () => {
+  let calls = 0;
+  const harness = createHarness(
+    async () => {
+      calls++;
+      return { type: "implement", summary: "Task" };
+    },
+    "print",
+  );
+  await harness.emit("before_agent_start", { prompt: "Task" });
+
+  assert.equal(calls, 0);
+});
+
+test("model classifier disables reasoning and returns undefined on failure", async () => {
+  let options;
+  const ctx = {
+    model: {
+      provider: "test-provider",
+      id: "test-model",
+      reasoning: true,
+      thinkingLevelMap: { off: "none" },
+    },
+    modelRegistry: {
+      async getApiKeyAndHeaders() {
+        return {
+          ok: true,
+          apiKey: "test-key",
+          headers: { authorization: "test" },
+          env: {},
+        };
+      },
+    },
+    signal: undefined,
+  };
+
+  const classification = await classifyWorkWithModel(
+    "Classify unique model task 1",
+    ctx,
+    async (_model, _context, receivedOptions) => {
+      options = receivedOptions;
+      return {
+        stopReason: "stop",
+        content: [
+          {
+            type: "text",
+            text: '{"type":"review","summary":"Review model output"}',
+          },
+        ],
+      };
+    },
+  );
+
+  assert.deepEqual(classification, {
+    type: "review",
+    summary: "Review model output",
+  });
+  assert.equal("reasoning" in options, false);
+  assert.equal("temperature" in options, false);
+  assert.equal(options.maxRetries, 0);
+
+  assert.equal(
+    await classifyWorkWithModel(
+      "Classify unique model task 2",
+      ctx,
+      async () => {
+        throw new Error("provider unavailable");
+      },
+    ),
+    undefined,
+  );
+});
+
+test("model classifier skips models that cannot disable reasoning", async () => {
+  let called = false;
+  const classification = await classifyWorkWithModel(
+    "Classify unique model task 3",
+    {
+      model: {
+        provider: "test-provider",
+        id: "always-reasoning",
+        reasoning: true,
+        thinkingLevelMap: { off: null },
+      },
+      modelRegistry: {
+        async getApiKeyAndHeaders() {
+          throw new Error("should not resolve auth");
+        },
+      },
+      signal: undefined,
+    },
+    async () => {
+      called = true;
+      return {};
+    },
+  );
+
+  assert.equal(classification, undefined);
+  assert.equal(called, false);
 });
