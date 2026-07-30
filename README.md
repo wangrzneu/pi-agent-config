@@ -9,6 +9,7 @@ A personally maintained collection of configurations, extensions, and workflows 
 - `extensions/plan-mode/`: read-only planning mode
 - `extensions/markdown-viewer/`: open and render local Markdown files in the Pi TUI
 - `extensions/work-status/`: show the current task and work type in the Pi TUI
+- `extensions/btw/`: ask temporary side questions without changing the main conversation
 - `skills/pi-workflow/`: concise default working guidelines
 - `prompts/`: on-demand prompts for review, debugging, and architecture tasks
 - `docs/`: reference documentation for code exploration, external projects, and security boundaries
@@ -74,6 +75,13 @@ pi
 
 After Pi starts, use `/plan` to toggle planning mode.
 
+Use `/btw <question>` for a temporary, context-aware side question. It uses the current model and
+conversation, with isolated read-only `read`, `grep`, `find`, and `ls` tools when file inspection is
+needed. Neither the question, answer, nor tool results are added to the main session.
+Each invocation produces one answer; run another `/btw <question>` for a new side question. Run
+`/btw` without a question to reopen the latest answer. The answer view supports scrolling, history
+navigation, copying with `c`, clearing with `x`, and closing with `q`, `Esc`, `Enter`, or `Space`.
+
 While the agent is running, the footer shows a compact summary of the current task and its type:
 Design, Plan, Implement, Test, Review, Fix, or Explore. The selected model performs one short
 classification request with extended thinking disabled, while the working message shows the
@@ -128,6 +136,7 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
 - Files in `docs/` are reference material and should not be added to every task's context automatically.
 - Plan mode injects its model reminder only once when the mode is entered; tool interceptors continuously enforce the read-only restrictions.
 - Work status uses one short, no-reasoning model request for each uncached task. It consumes a small number of tokens but does not add the result to the session context.
+- Each `/btw` question uses a separate model loop with a small output and tool-call budget. Read-only tool results stay ephemeral and the exchange is not stored in the session.
 - The Markdown viewer, directory navigation, search, images, and Mermaid rendering are processed only inside the TUI extension and do not add content to the model context.
 
 ## Design Principles

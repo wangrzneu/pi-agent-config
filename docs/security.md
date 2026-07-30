@@ -24,6 +24,15 @@ The allowlist should stay narrow. New commands or flags require tests showing bo
 - Opening a link is always user-initiated with Enter and delegates the target to the operating system.
 - Embedded HTML and scripts are not executed. Raster images are limited to PNG, JPEG, GIF, and WebP with an 8 MiB limit.
 
+## BTW side questions
+
+- `/btw` sends the current compaction-aware conversation context and side question to the selected model provider.
+- The isolated request can use only the built-in `read`, `grep`, `find`, and `ls` tools. It cannot run shell commands or mutate files.
+- The question, model responses, and tool results are not appended to the Pi session.
+- Tool use is capped at four rounds and twelve calls, with a shared 30-second timeout.
+- Up to 20 successful exchanges remain in process memory for history navigation. They are discarded on reload, session replacement, exit, or explicit `x` clearing.
+- Copying an answer to the system clipboard is always user-initiated with `c`.
+
 ## Recommended checks
 
 Cover newline injection, shell metacharacters, command substitution, Git output or execution flags, branch mutation, find execution or deletion, and ordinary read-only commands.
