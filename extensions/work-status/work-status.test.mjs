@@ -62,6 +62,10 @@ test("describes tool activity with compact useful details", () => {
     "Reading work-status/index.ts",
   );
   assert.equal(describeToolActivity("grep", { pattern: "setStatus" }), "Searching for setStatus");
+  assert.equal(
+    describeToolActivity("ssh_job_status", { job_id: "job-123" }),
+    "SSH job status · job-123",
+  );
   assert.equal(describeToolActivity("custom_tool", {}), "Running custom tool");
 });
 

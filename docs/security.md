@@ -33,6 +33,18 @@ The allowlist should stay narrow. New commands or flags require tests showing bo
 - Up to 20 successful exchanges remain in process memory for history navigation. They are discarded on reload, session replacement, exit, or explicit `x` clearing.
 - Copying an answer to the system clipboard is always user-initiated with `c`.
 
+## SSH tools
+
+- A host must be explicitly authorized for the current Pi session before another SSH tool can use it.
+- Execution, transfer, job start, and cancellation require an interactive TUI confirmation. They fail closed in print and RPC modes.
+- Passwords are collected through masked input, excluded from tool arguments and session records, and cached only in process memory. OpenSSH receives a password through `SSH_ASKPASS`; remote `sudo` receives it through standard input.
+- Local upload and download paths must remain inside the current workspace. Remote paths are governed by the remote account and are not sandboxed by this extension.
+- Output and time are bounded, but terminating the local SSH client cannot prove that every remote descendant stopped. Use the detached job tools and a remote process supervisor for important workloads.
+- Host-key behavior comes from the system OpenSSH configuration. The extension never enables `StrictHostKeyChecking=no`.
+- Arbitrary remote shell remains remote code execution. Use dedicated low-privilege accounts, narrowly scoped sudo rules, and reviewed runbooks for production systems.
+
+See [`ssh-tools.md`](ssh-tools.md) for the complete operational model.
+
 ## Recommended checks
 
 Cover newline injection, shell metacharacters, command substitution, Git output or execution flags, branch mutation, find execution or deletion, and ordinary read-only commands.

@@ -10,6 +10,7 @@ A personally maintained collection of configurations, extensions, and workflows 
 - `extensions/markdown-viewer/`: open and render local Markdown files in the Pi TUI
 - `extensions/work-status/`: show the current task and work type in the Pi TUI
 - `extensions/btw/`: ask temporary side questions without changing the main conversation
+- `extensions/ssh-tools/`: dynamically discovered SSH execution, transfer, and remote job tools
 - `skills/pi-workflow/`: concise default working guidelines
 - `prompts/`: on-demand prompts for review, debugging, and architecture tasks
 - `docs/`: reference documentation for code exploration, external projects, and security boundaries
@@ -82,6 +83,14 @@ Each invocation produces one answer; run another `/btw <question>` for a new sid
 `/btw` without a question to reopen the latest answer. The answer view supports scrolling, history
 navigation, copying with `c`, clearing with `x`, and closing with `q`, `Esc`, `Enter`, or `Space`.
 
+Remote SSH work starts with a single lightweight `ssh_enable` tool. After session-level host
+authorization, the model activates only the capability groups needed for the current task:
+foreground execution, binary-safe upload/download, or detached jobs with status and cancellation.
+Each remote action requires interactive approval. SSH and sudo passwords, when required, are read
+through masked TUI input and kept only in process memory; they are never model tool arguments.
+Use `/ssh-tools` to inspect the current state, or `/ssh-tools off|on|reset` to control it. See
+[`docs/ssh-tools.md`](docs/ssh-tools.md) for requirements, behavior, and security boundaries.
+
 While the agent is running, the footer shows a compact summary of the current task and its type:
 Design, Plan, Implement, Test, Review, Fix, or Explore. The selected model performs one short
 classification request with extended thinking disabled, while the working message shows the
@@ -138,6 +147,7 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
 - Work status uses one short, no-reasoning model request for each uncached task. It consumes a small number of tokens but does not add the result to the session context.
 - Each `/btw` question uses a separate model loop with a small output and tool-call budget. Read-only tool results stay ephemeral and the exchange is not stored in the session.
 - The Markdown viewer, directory navigation, search, images, and Mermaid rendering are processed only inside the TUI extension and do not add content to the model context.
+- SSH exposes only the compact `ssh_enable` selector by default. Capability tools are added for the current agent run, while job status and cancellation remain visible only for tracked jobs. No extra classifier request is made.
 
 ## Design Principles
 

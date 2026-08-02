@@ -60,6 +60,14 @@ export function describeToolActivity(
     return path ? `Exploring ${shortPath(path)}` : "Exploring files";
   }
 
+  if (toolName.startsWith("ssh_")) {
+    const host = stringArg(args, "host");
+    const job = stringArg(args, "job_id");
+    const action = toolName.slice(4).replaceAll("_", " ");
+    const target = host || job;
+    return target ? `SSH ${action} · ${summarizeWork(target, 30)}` : `SSH ${action}`;
+  }
+
   return `Running ${toolName.replaceAll("_", " ")}`;
 }
 
