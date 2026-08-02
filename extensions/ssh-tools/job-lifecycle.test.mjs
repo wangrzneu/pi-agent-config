@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -17,7 +17,7 @@ function runScript(script, jobRoot) {
     input: script,
     encoding: "utf8",
     env: { ...process.env, PI_SSH_JOB_DIR: jobRoot },
-    timeout: 10_000,
+    timeout: 15_000,
   });
 }
 
@@ -66,6 +66,27 @@ test("detached job can be cancelled", async () => {
     const checked = runScript(buildJobStatusScript(job.directory, 0, 0, 1024), root);
     assert.equal(checked.status, 0, checked.stderr);
     assert.equal(parseJobStatus(checked.stdout).state, "cancelled");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("repeating the same start request reuses the remote job", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-ssh-jobs-"));
+  try {
+    const script = buildStartJobScript(
+      "job-retry",
+      root,
+      "printf x >> count; sleep 0.5",
+    );
+    const first = runScript(script, root);
+    const second = runScript(script, root);
+    assert.equal(first.status, 0, first.stderr);
+    assert.equal(second.status, 0, second.stderr);
+    assert.equal(parseStartedJob(first.stdout).pid, parseStartedJob(second.stdout).pid);
+
+    await wait(700);
+    assert.equal(await readFile(join(root, "count"), "utf8"), "x");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

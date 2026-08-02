@@ -7,6 +7,16 @@ import type {
 import { Type } from "typebox";
 import { isPlanModeActive } from "../work-status/plan-mode-state.ts";
 import {
+  DEFAULT_CONNECTION_POLICY,
+  SshAuthorization,
+  type ConnectionRetryPolicy,
+} from "./authorization.ts";
+import {
+  runWithConnectionRetry,
+  type ConnectionRetryMode,
+  type RetriedProcessResult,
+} from "./connection-retry.ts";
+import {
   buildCancelJobScript,
   buildJobStatusScript,
   buildStartJobScript,
@@ -71,82 +81,108 @@ interface JobRecord {
   state: RemoteJobState;
 }
 
+interface SshRunOptions extends ProcessOptions {
+  retryMode?: ConnectionRetryMode;
+  policy?: ConnectionRetryPolicy;
+}
+
 class SshSession {
-  readonly authorizedHosts = new Set<string>();
+  readonly authorization = new SshAuthorization();
   readonly jobs = new Map<string, JobRecord>();
   private readonly sshPasswords = new Map<string, string>();
   private readonly sudoPasswords = new Map<string, string>();
 
-  async authorize(host: string, ctx: ExtensionContext): Promise<void> {
+  async authorize(
+    host: string,
+    capabilities: readonly SshCapability[],
+    policy: ConnectionRetryPolicy,
+    ctx: ExtensionContext,
+  ): Promise<void> {
     validateHost(host);
-    if (this.authorizedHosts.has(host)) return;
-    await requireApproval(
-      ctx,
-      "Authorize SSH host",
-      `Allow remote tools to connect to ${host} for this Pi session?`,
-    );
-    const result = await this.runSsh(host, "true", {}, ctx);
-    requireSuccess(result, `Unable to connect to ${host}`);
-    this.authorizedHosts.add(host);
+    const missing = this.authorization.missingCapabilities(host, capabilities);
+    if (missing.length === 0) {
+      this.authorization.grant(host, [], policy);
+      return;
+    }
+    await requireApproval(ctx, "Authorize SSH capabilities", authorizationMessage(host, missing, policy));
+    if (!this.authorization.isConnected(host)) {
+      const result = await this.runSsh(
+        host,
+        "true",
+        { policy, retryMode: "transport", signal: ctx.signal },
+        ctx,
+      );
+      requireSuccess(result, `Unable to connect to ${host}`);
+    }
+    this.authorization.grant(host, missing, policy);
   }
 
-  assertAuthorized(host: string): void {
+  assertCapability(host: string, capability: SshCapability): void {
     validateHost(host);
-    if (!this.authorizedHosts.has(host)) {
-      throw new Error(`SSH host ${host} is not authorized. Call ssh_enable first.`);
-    }
+    this.authorization.assertCapability(host, capability);
   }
 
   async runSsh(
     host: string,
     remoteCommand: string,
-    options: ProcessOptions,
+    options: SshRunOptions,
     ctx: ExtensionContext,
-  ): Promise<ProcessResult> {
-    const cached = this.sshPasswords.get(host);
-    let result = await runProcess(
-      "ssh",
-      [...sshArguments(host, cached), remoteCommand],
-      { ...options, env: askpassEnvironment(cached) },
+  ): Promise<RetriedProcessResult> {
+    const policy = options.policy ?? this.authorization.policyFor(host);
+    const retryMode = options.retryMode ?? "connect";
+    const { retryMode: _retryMode, policy: _policy, ...processOptions } = options;
+    const run = (password?: string) => runWithConnectionRetry(
+      () => runProcess(
+        "ssh",
+        [...sshArguments(host, password, policy.connectTimeoutSeconds), remoteCommand],
+        { ...processOptions, env: askpassEnvironment(password) },
+      ),
+      policy,
+      retryMode,
+      processOptions.signal,
     );
+    const cached = this.sshPasswords.get(host);
+    let result = await run(cached);
     if (!isAuthenticationFailure(result)) return result;
 
     if (cached) this.sshPasswords.delete(host);
     const password = await requestPassword(ctx, `SSH password for ${host}`);
-    result = await runProcess(
-      "ssh",
-      [...sshArguments(host, password), remoteCommand],
-      { ...options, env: askpassEnvironment(password) },
-    );
+    const authenticationAttempts = result.attempts;
+    result = await run(password);
     if (isAuthenticationFailure(result)) throw new Error(`SSH authentication failed for ${host}.`);
     this.sshPasswords.set(host, password);
-    return result;
+    return { ...result, attempts: authenticationAttempts + result.attempts };
   }
 
   async runScp(
     host: string,
     operands: readonly string[],
-    options: ProcessOptions,
+    options: SshRunOptions,
     ctx: ExtensionContext,
-  ): Promise<ProcessResult> {
-    const cached = this.sshPasswords.get(host);
-    let result = await runProcess(
-      "scp",
-      [...scpArguments(cached), ...operands],
-      { ...options, env: askpassEnvironment(cached) },
+  ): Promise<RetriedProcessResult> {
+    const policy = options.policy ?? this.authorization.policyFor(host);
+    const { retryMode: _retryMode, policy: _policy, ...processOptions } = options;
+    const run = (password?: string) => runWithConnectionRetry(
+      () => runProcess(
+        "scp",
+        [...scpArguments(password, policy.connectTimeoutSeconds), ...operands],
+        { ...processOptions, env: askpassEnvironment(password) },
+      ),
+      policy,
+      "transport",
+      processOptions.signal,
     );
+    const cached = this.sshPasswords.get(host);
+    let result = await run(cached);
     if (!isAuthenticationFailure(result)) return result;
 
     if (cached) this.sshPasswords.delete(host);
     const password = await requestPassword(ctx, `SSH password for ${host}`);
-    result = await runProcess(
-      "scp",
-      [...scpArguments(password), ...operands],
-      { ...options, env: askpassEnvironment(password) },
-    );
+    const authenticationAttempts = result.attempts;
+    result = await run(password);
     if (isAuthenticationFailure(result)) throw new Error(`SSH authentication failed for ${host}.`);
     this.sshPasswords.set(host, password);
-    return result;
+    return { ...result, attempts: authenticationAttempts + result.attempts };
   }
 
   async runRemote(
@@ -154,9 +190,9 @@ class SshSession {
     command: string,
     stdin: string | Buffer | undefined,
     sudo: boolean,
-    options: ProcessOptions,
+    options: SshRunOptions,
     ctx: ExtensionContext,
-  ): Promise<ProcessResult> {
+  ): Promise<RetriedProcessResult> {
     if (!sudo) return this.runSsh(host, command, { ...options, stdin }, ctx);
 
     const privileged = preparePrivilegedInput(command, stdin);
@@ -197,6 +233,14 @@ class SshSession {
     this.sshPasswords.clear();
     this.sudoPasswords.clear();
   }
+
+  clearTurnAuthorization(): void {
+    this.authorization.clearTurnGrants();
+  }
+
+  resetAuthorization(): void {
+    this.authorization.reset();
+  }
 }
 
 export default function sshToolsExtension(pi: ExtensionAPI): void {
@@ -211,19 +255,44 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "ssh_enable",
     label: "Enable SSH tools",
-    description: "Authorize one SSH host for this session and expose only the remote capability groups needed now.",
+    description: "Authorize one SSH host and selected capabilities for this agent run, with bounded connection retry settings.",
     promptSnippet: "Use ssh_enable before remote SSH work to activate the required capability groups",
-    parameters: Type.Object({ host: HOST, capabilities: CAPABILITIES }),
+    parameters: Type.Object({
+      host: HOST,
+      capabilities: CAPABILITIES,
+      connect_timeout_seconds: Type.Optional(Type.Integer({
+        description: "Timeout for establishing each SSH connection",
+        minimum: 1,
+        maximum: 60,
+      })),
+      connection_retries: Type.Optional(Type.Integer({
+        description: "Retries after retryable SSH connection failures",
+        minimum: 0,
+        maximum: 3,
+      })),
+      retry_delay_ms: Type.Optional(Type.Integer({
+        description: "Initial retry delay; later retries use exponential backoff",
+        minimum: 100,
+        maximum: 5000,
+      })),
+    }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       if (signal?.aborted) throw new Error("SSH authorization cancelled.");
-      await session.authorize(params.host, ctx);
-      const active = activation.activate(params.capabilities as SshCapability[]);
+      const capabilities = params.capabilities as SshCapability[];
+      const policy = {
+        connectTimeoutSeconds:
+          params.connect_timeout_seconds ?? DEFAULT_CONNECTION_POLICY.connectTimeoutSeconds,
+        retries: params.connection_retries ?? DEFAULT_CONNECTION_POLICY.retries,
+        retryDelayMs: params.retry_delay_ms ?? DEFAULT_CONNECTION_POLICY.retryDelayMs,
+      };
+      await session.authorize(params.host, capabilities, policy, ctx);
+      const active = activation.activate(capabilities);
       return {
         content: [{
           type: "text",
           text: `Authorized ${params.host}. Activated: ${active.filter((name) => name !== "ssh_enable").join(", ") || "none"}.`,
         }],
-        details: { host: params.host, capabilities: params.capabilities },
+        details: { host: params.host, capabilities, connectionPolicy: policy },
         addedToolNames: active.filter((name) => name !== "ssh_enable"),
       };
     },
@@ -243,12 +312,14 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
     }),
     executionMode: "sequential",
     async execute(_id, params, signal, _onUpdate, ctx) {
-      session.assertAuthorized(params.host);
-      await requireApproval(
-        ctx,
-        params.sudo ? "Run remote command with sudo" : "Run remote command",
-        `${params.host}${params.cwd ? ` · ${params.cwd}` : ""}\n\n${preview(params.command)}`,
-      );
+      session.assertCapability(params.host, "exec");
+      if (params.sudo) {
+        await requireApproval(
+          ctx,
+          "Run remote command with sudo",
+          `${params.host}${params.cwd ? ` · ${params.cwd}` : ""}\n\n${preview(params.command)}`,
+        );
+      }
       const inner = params.cwd
         ? `cd -- ${shellQuote(params.cwd)} && exec sh -lc ${shellQuote(params.command)}`
         : `exec sh -lc ${shellQuote(params.command)}`;
@@ -261,6 +332,7 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
           signal,
           timeoutMs: (params.timeout_seconds ?? 60) * 1000,
           maxOutputBytes: params.max_output_bytes ?? DEFAULT_OUTPUT_BYTES,
+          retryMode: "connect",
         },
         ctx,
       );
@@ -283,16 +355,11 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
     }),
     executionMode: "sequential",
     async execute(_id, params, signal, _onUpdate, ctx) {
-      session.assertAuthorized(params.host);
+      session.assertCapability(params.host, "files");
       validateRemotePath(params.remote_path);
       const localPath = await workspaceUploadPath(ctx.cwd, params.local_path);
       const file = await stat(localPath);
       if (!file.isFile()) throw new Error("ssh_upload supports regular files only.");
-      await requireApproval(
-        ctx,
-        "Upload file over SSH",
-        `${localPath}\n→ ${params.host}:${params.remote_path}\n${file.size} bytes`,
-      );
       const result = await session.runScp(
         params.host,
         [localPath, `${params.host}:${params.remote_path}`],
@@ -318,14 +385,9 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
     }),
     executionMode: "sequential",
     async execute(_id, params, signal, _onUpdate, ctx) {
-      session.assertAuthorized(params.host);
+      session.assertCapability(params.host, "files");
       validateRemotePath(params.remote_path);
       const localPath = await workspaceDownloadPath(ctx.cwd, params.local_path);
-      await requireApproval(
-        ctx,
-        "Download file over SSH",
-        `${params.host}:${params.remote_path}\n→ ${localPath}`,
-      );
       const temporary = `${localPath}.pi-ssh-${randomUUID()}.part`;
       try {
         const result = await session.runScp(
@@ -360,12 +422,14 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
     }),
     executionMode: "sequential",
     async execute(_id, params, signal, _onUpdate, ctx) {
-      session.assertAuthorized(params.host);
-      await requireApproval(
-        ctx,
-        params.sudo ? "Start remote sudo job" : "Start remote job",
-        `${params.host} · ${params.cwd}\n\n${preview(params.command)}`,
-      );
+      session.assertCapability(params.host, "jobs");
+      if (params.sudo) {
+        await requireApproval(
+          ctx,
+          "Start remote sudo job",
+          `${params.host} · ${params.cwd}\n\n${preview(params.command)}`,
+        );
+      }
       const id = randomUUID();
       const script = buildStartJobScript(id, params.cwd, params.command);
       const result = await session.runRemote(
@@ -373,7 +437,12 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
         "sh -s",
         script,
         params.sudo ?? false,
-        { signal, timeoutMs: 20_000, maxOutputBytes: DEFAULT_OUTPUT_BYTES },
+        {
+          signal,
+          timeoutMs: 20_000,
+          maxOutputBytes: DEFAULT_OUTPUT_BYTES,
+          retryMode: "transport",
+        },
         ctx,
       );
       requireSuccess(result, "Unable to start remote job");
@@ -422,7 +491,12 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
         "sh -s",
         script,
         job.sudo,
-        { signal, timeoutMs: 20_000, maxOutputBytes: 192 * 1024 },
+        {
+          signal,
+          timeoutMs: 20_000,
+          maxOutputBytes: 192 * 1024,
+          retryMode: "transport",
+        },
         ctx,
       );
       requireSuccess(result, "Unable to read remote job status");
@@ -469,7 +543,12 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
         "sh -s",
         script,
         job.sudo,
-        { signal, timeoutMs: 45_000, maxOutputBytes: DEFAULT_OUTPUT_BYTES },
+        {
+          signal,
+          timeoutMs: 45_000,
+          maxOutputBytes: DEFAULT_OUTPUT_BYTES,
+          retryMode: "transport",
+        },
         ctx,
       );
       requireSuccess(result, "Unable to cancel remote job");
@@ -482,7 +561,12 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
           "sh -s",
           buildJobStatusScript(job.directory, 0, 0, 256),
           job.sudo,
-          { signal, timeoutMs: 20_000, maxOutputBytes: DEFAULT_OUTPUT_BYTES },
+          {
+            signal,
+            timeoutMs: 20_000,
+            maxOutputBytes: DEFAULT_OUTPUT_BYTES,
+            retryMode: "transport",
+          },
           ctx,
         );
         requireSuccess(checked, "Unable to confirm remote job state");
@@ -507,6 +591,7 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
       const action = args.trim().toLowerCase();
       if (action === "off") {
         activation.setEnabled(false);
+        session.clearTurnAuthorization();
         session.clearSecrets();
         ctx.ui.notify("SSH tools disabled; remote jobs continue running.", "info");
         return;
@@ -517,13 +602,13 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
         return;
       }
       if (action === "reset") {
-        session.authorizedHosts.clear();
+        session.resetAuthorization();
         session.clearSecrets();
         activation.settle();
         ctx.ui.notify("SSH host authorizations and cached passwords cleared; remote jobs continue running.", "info");
         return;
       }
-      const hosts = [...session.authorizedHosts].join(", ") || "none";
+      const hosts = session.authorization.getHosts().join(", ") || "none";
       const running = [...session.jobs.values()].filter((job) => job.state === "running").length;
       ctx.ui.notify(`Authorized hosts: ${hosts}\nTracked jobs: ${session.jobs.size} (${running} running)`, "info");
     },
@@ -532,10 +617,25 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
   pi.on("session_start", () => activation.sync(isPlanModeActive()));
   pi.on("before_agent_start", () => activation.sync(isPlanModeActive()));
   pi.on("agent_settled", () => {
+    session.clearTurnAuthorization();
     activation.settle();
     activation.sync(isPlanModeActive());
   });
   pi.on("session_shutdown", () => session.clearSecrets());
+}
+
+function authorizationMessage(
+  host: string,
+  capabilities: readonly SshCapability[],
+  policy: ConnectionRetryPolicy,
+): string {
+  const labels: Record<SshCapability, string> = {
+    exec: "execute foreground commands",
+    files: "upload and download workspace files",
+    jobs: "start detached remote jobs",
+  };
+  const grants = capabilities.map((capability) => `• ${labels[capability]}`).join("\n");
+  return `Allow ${host} for this agent run?\n\n${grants}\n\nConnection timeout: ${policy.connectTimeoutSeconds}s\nConnection retries: ${policy.retries}`;
 }
 
 async function requestPassword(ctx: ExtensionContext, title: string): Promise<string> {
@@ -604,7 +704,9 @@ function requireSuccess(result: ProcessResult, prefix: string): void {
   if (result.timedOut) throw new Error(`${prefix}: timed out.`);
   if (result.exitCode === 0) return;
   const stderr = result.stderr.toString("utf8").trim();
-  throw new Error(`${prefix} (exit ${result.exitCode ?? result.signal ?? "unknown"})${stderr ? `: ${stderr}` : "."}`);
+  const attempts = processAttempts(result);
+  const attemptText = attempts > 1 ? ` after ${attempts} attempts` : "";
+  throw new Error(`${prefix}${attemptText} (exit ${result.exitCode ?? result.signal ?? "unknown"})${stderr ? `: ${stderr}` : "."}`);
 }
 
 function formatProcessResult(result: ProcessResult): string {
@@ -618,6 +720,7 @@ function formatProcessResult(result: ProcessResult): string {
   if (result.timedOut) sections.push("The local SSH process timed out; a detached remote child may still be running.");
   if (result.aborted) sections.push("The local SSH process was cancelled.");
   if (result.truncated) sections.push("Output was truncated at the configured byte limit.");
+  if (processAttempts(result) > 1) sections.push(`SSH process attempts: ${processAttempts(result)}.`);
   return sections.join("\n\n");
 }
 
@@ -629,7 +732,13 @@ function processDetails(host: string, result: ProcessResult): Record<string, unk
     timedOut: result.timedOut,
     aborted: result.aborted,
     truncated: result.truncated,
+    attempts: processAttempts(result),
   };
+}
+
+function processAttempts(result: ProcessResult): number {
+  const attempts = (result as ProcessResult & { attempts?: number }).attempts;
+  return Number.isSafeInteger(attempts) && attempts! > 0 ? attempts! : 1;
 }
 
 function requireJob(jobs: ReadonlyMap<string, JobRecord>, id: string): JobRecord {

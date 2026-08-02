@@ -17,6 +17,7 @@ test("job start protocol embeds command as base64 and parses metadata", () => {
   const command = "printf \"hello ' remote\"";
   const script = buildStartJobScript("job-1", "/tmp/work dir", command);
   assert.match(script, /base64 -d/);
+  assert.match(script, /start\.lock/);
   assert.ok(!script.includes(command));
 
   const directory = Buffer.from("/tmp/jobs/job-1").toString("base64");

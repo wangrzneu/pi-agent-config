@@ -19,7 +19,7 @@ Only `ssh_enable` is visible initially. The model calls it with an SSH host and 
 | `files` | `ssh_upload`, `ssh_download` |
 | `jobs` | `ssh_job_start` |
 
-After a job starts, `ssh_job_status` and `ssh_job_cancel` remain visible while needed. Execution, file, and job-start tools are withdrawn when the agent settles. Tool activation always starts from `pi.getActiveTools()` and changes only the SSH tool names, so unrelated user tool settings are preserved.
+After a job starts, `ssh_job_status` and `ssh_job_cancel` remain visible while needed. Execution, file, and job-start tools are withdrawn when the agent settles. Capability grants expire at the same boundary, so a later agent run must authorize its required host/capability pairs again. Tool activation always starts from `pi.getActiveTools()` and changes only the SSH tool names, so unrelated user tool settings are preserved.
 
 No keyword matcher or extra classifier request is used. The active model selects the capability enum from the `ssh_enable` schema.
 
@@ -33,7 +33,7 @@ Upload dist/app.tar.gz to deploy:/tmp/app.tar.gz.
 Start the integration test on build-host as a long job and monitor it.
 ```
 
-The first use of a host requires explicit session authorization. Remote execution, upload, download, job start, and cancellation each show an interactive confirmation containing the target and operation. These actions are unavailable in print/RPC mode because those modes cannot provide interactive approval.
+`ssh_enable` displays one interactive authorization containing the host, newly requested capability groups, connection timeout, and retry count. The grant covers ordinary operations in those groups for the current agent run, avoiding a confirmation for every command or transfer. Adding another capability or starting a later agent run requires another grant. `sudo` execution and job cancellation always retain their own operation-specific confirmation. Remote actions are unavailable in print/RPC mode because those modes cannot provide interactive approval.
 
 Use `/ssh-tools` to inspect authorized hosts and tracked jobs:
 
@@ -44,7 +44,7 @@ Use `/ssh-tools` to inspect authorized hosts and tracked jobs:
 /ssh-tools reset
 ```
 
-`off` hides all SSH tools and clears cached passwords. `reset` clears host authorizations and cached passwords. Neither command stops an already detached remote job.
+`off` hides all SSH tools and clears current grants and cached passwords. `reset` additionally clears remembered hosts and connection policies. Neither command stops an already detached remote job.
 
 ## Execution and output
 
@@ -53,6 +53,18 @@ Use `/ssh-tools` to inspect authorized hosts and tracked jobs:
 - Job output is fetched incrementally with separate stdout and stderr byte offsets. Each status call returns the next offsets.
 - Remote job metadata and logs are stored under `${PI_SSH_JOB_DIR}` when set, otherwise `${XDG_STATE_HOME:-$HOME/.local/state}/pi-agent/jobs`.
 - Job IDs are tracked only in the current Pi process. Exiting Pi does not stop a remote job, but the current version cannot rediscover it after restart.
+
+## Connection retry
+
+`ssh_enable` configures the connection policy for its host:
+
+- `connect_timeout_seconds`: 10 seconds by default, range 1–60;
+- `connection_retries`: 2 retries by default, range 0–3;
+- `retry_delay_ms`: 500 ms by default, range 100–5000, with exponential backoff capped at 10 seconds.
+
+Retries are limited to recognizable OpenSSH connection, transport, authentication, and host-key failures. Host-key retries never disable or bypass OpenSSH verification; they only allow a later attempt to succeed after the trusted host-key state has been corrected externally. Authentication retries apply separately to the initial key/agent attempt and, when requested, the password attempt. Use a low retry count where repeated failures could trigger account lockout. Remote command exit codes and operation timeouts are never retried automatically. Foreground commands retry only failures known to occur before command execution; upload, download, status, and cancellation are safe to retry as transport operations. Job start uses the same generated job ID and a remote start lock, so a repeated request returns the existing process instead of starting a duplicate.
+
+The operation timeout bounds each process attempt but is not itself retryable. Total elapsed time can therefore include preceding connection attempts and backoff delays plus the final operation timeout.
 
 ## File transfer
 

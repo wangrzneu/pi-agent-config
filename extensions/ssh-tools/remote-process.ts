@@ -31,6 +31,12 @@ export async function runProcess(
     stdio: ["pipe", "pipe", "pipe"],
     env: options.env,
   });
+  const completion = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+    (resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (code, closeSignal) => resolve({ code, signal: closeSignal }));
+    },
+  );
   const stdout = new BoundedBuffer(maxOutputBytes);
   const stderr = new BoundedBuffer(maxOutputBytes);
   let timedOut = false;
@@ -51,15 +57,11 @@ export async function runProcess(
     ? setTimeout(() => stop("timeout"), options.timeoutMs)
     : undefined;
   const onAbort = () => stop("abort");
-  options.signal?.addEventListener("abort", onAbort, { once: true });
+  if (options.signal?.aborted) onAbort();
+  else options.signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
-    const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-      (resolve, reject) => {
-        child.on("error", reject);
-        child.on("close", (code, closeSignal) => resolve({ code, signal: closeSignal }));
-      },
-    );
+    const result = await completion;
     return {
       stdout: stdout.value(),
       stderr: stderr.value(),
@@ -75,18 +77,22 @@ export async function runProcess(
   }
 }
 
-export function sshArguments(host: string, password?: string): string[] {
+export function sshArguments(
+  host: string,
+  password?: string,
+  connectTimeoutSeconds = 10,
+): string[] {
   return [
-    "-o", "ConnectTimeout=10",
+    "-o", `ConnectTimeout=${connectTimeoutSeconds}`,
     "-o", `BatchMode=${password ? "no" : "yes"}`,
     "-o", "NumberOfPasswordPrompts=1",
     host,
   ];
 }
 
-export function scpArguments(password?: string): string[] {
+export function scpArguments(password?: string, connectTimeoutSeconds = 10): string[] {
   return [
-    "-o", "ConnectTimeout=10",
+    "-o", `ConnectTimeout=${connectTimeoutSeconds}`,
     "-o", `BatchMode=${password ? "no" : "yes"}`,
     "-o", "NumberOfPasswordPrompts=1",
   ];

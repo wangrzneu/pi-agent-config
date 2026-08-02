@@ -35,11 +35,12 @@ The allowlist should stay narrow. New commands or flags require tests showing bo
 
 ## SSH tools
 
-- A host must be explicitly authorized for the current Pi session before another SSH tool can use it.
-- Execution, transfer, job start, and cancellation require an interactive TUI confirmation. They fail closed in print and RPC modes.
+- A host and each requested capability group must be explicitly authorized for the current agent run. Grants expire when the agent settles and fail closed in print and RPC modes.
+- Ordinary operations covered by the grant do not prompt repeatedly. `sudo` and job cancellation always require a separate operation-specific confirmation.
 - Passwords are collected through masked input, excluded from tool arguments and session records, and cached only in process memory. OpenSSH receives a password through `SSH_ASKPASS`; remote `sudo` receives it through standard input.
 - Local upload and download paths must remain inside the current workspace. Remote paths are governed by the remote account and are not sandboxed by this extension.
 - Output and time are bounded, but terminating the local SSH client cannot prove that every remote descendant stopped. Use the detached job tools and a remote process supervisor for important workloads.
+- Retries are bounded and include recognized connection, transport, authentication, and host-key failures. Host-key verification remains enabled, and repeated authentication failures can contribute to account lockout. Remote exits and operation timeouts are excluded. Foreground commands retry only recognized pre-execution failures; detached job starts use a stable ID and remote lock to prevent duplicate execution.
 - Host-key behavior comes from the system OpenSSH configuration. The extension never enables `StrictHostKeyChecking=no`.
 - Arbitrary remote shell remains remote code execution. Use dedicated low-privilege accounts, narrowly scoped sudo rules, and reviewed runbooks for production systems.
 

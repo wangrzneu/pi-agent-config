@@ -26,6 +26,35 @@ umask 077
 job_root="\${PI_SSH_JOB_DIR:-\${XDG_STATE_HOME:-$HOME/.local/state}/pi-agent/jobs}"
 job_dir="$job_root/${jobId}"
 mkdir -p "$job_dir"
+emit_existing_job() {
+  if [ ! -s "$job_dir/pid" ]; then return 1; fi
+  job_dir_b64=$(printf %s "$job_dir" | base64 | tr -d '\n')
+  printf 'PI_JOB\t%s\t%s\n' "$(cat "$job_dir/pid")" "$job_dir_b64"
+  return 0
+}
+if emit_existing_job; then exit 0; fi
+if ! mkdir "$job_dir/start.lock" 2>/dev/null; then
+  attempt=0
+  while [ ! -s "$job_dir/pid" ] && [ "$attempt" -lt 80 ]; do
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  if emit_existing_job; then exit 0; fi
+  owner=$(cat "$job_dir/start.lock/owner" 2>/dev/null || printf 0)
+  if [ "$owner" -gt 0 ] 2>/dev/null && kill -0 "$owner" 2>/dev/null; then
+    printf '%s\n' 'job start is still in progress' >&2
+    exit 1
+  fi
+  rm -f "$job_dir/start.lock/owner"
+  rmdir "$job_dir/start.lock" 2>/dev/null || true
+  mkdir "$job_dir/start.lock"
+fi
+printf '%s\n' "$$" > "$job_dir/start.lock/owner"
+cleanup_start_lock() {
+  rm -f "$job_dir/start.lock/owner"
+  rmdir "$job_dir/start.lock" 2>/dev/null || true
+}
+trap cleanup_start_lock EXIT HUP INT TERM
 decode_base64() {
   if printf '' | base64 -d >/dev/null 2>&1; then base64 -d; else base64 -D; fi
 }
@@ -61,7 +90,7 @@ printf '%s\n' ${shellQuote(cwd)} > "$job_dir/cwd"
 : > "$job_dir/stderr"
 nohup "$job_dir/runner.sh" "$job_dir" ${shellQuote(cwd)} > /dev/null 2>&1 < /dev/null &
 attempt=0
-while [ ! -s "$job_dir/pid" ] && [ "$attempt" -lt 30 ]; do
+while [ ! -s "$job_dir/pid" ] && [ "$attempt" -lt 80 ]; do
   sleep 0.1
   attempt=$((attempt + 1))
 done
@@ -69,8 +98,7 @@ if [ ! -s "$job_dir/pid" ]; then
   printf '%s\n' 'job runner did not start' >&2
   exit 1
 fi
-job_dir_b64=$(printf %s "$job_dir" | base64 | tr -d '\n')
-printf 'PI_JOB\t%s\t%s\n' "$(cat "$job_dir/pid")" "$job_dir_b64"
+emit_existing_job
 `;
 }
 
