@@ -11,6 +11,11 @@ A personally maintained collection of configurations, extensions, and workflows 
 - `extensions/work-status/`: show the current task and work type in the Pi TUI
 - `extensions/btw/`: ask temporary side questions without changing the main conversation
 - `extensions/ssh-tools/`: dynamically discovered SSH execution, transfer, and remote job tools
+- `extensions/external-memory/`: opt-in synced-folder memory captured at compaction with two-stage recall
+
+External memory capture is opt-in per project: set `PI_AGENT_MEMORY_ROOT` to an absolute path, then run
+`/memory on` in that project. Evidence is written as immutable JSONL chunks and recalled with
+`/memory search` or the `memory_recall` tool. See [`docs/external-memory.md`](docs/external-memory.md).
 - `skills/pi-workflow/`: concise default working guidelines
 - `prompts/`: on-demand prompts for review, debugging, and architecture tasks
 - `docs/`: reference documentation for code exploration, external projects, and security boundaries

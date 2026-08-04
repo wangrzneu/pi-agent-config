@@ -9,7 +9,7 @@
     "agent-config"
   ],
   "scripts": {
-    "test": "node --experimental-strip-types --test extensions/plan-mode/index.test.mjs extensions/markdown-viewer/*.test.mjs extensions/work-status/*.test.mjs extensions/btw/*.test.mjs extensions/ssh-tools/*.test.mjs tests/skill-metadata.test.mjs"
+    "test": "node --experimental-strip-types --test extensions/plan-mode/index.test.mjs extensions/markdown-viewer/*.test.mjs extensions/work-status/*.test.mjs extensions/btw/*.test.mjs extensions/ssh-tools/*.test.mjs extensions/external-memory/*.test.mjs tests/skill-metadata.test.mjs"
   },
   "pi": {
     "extensions": [
