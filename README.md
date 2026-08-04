@@ -14,6 +14,8 @@ A personally maintained collection of configurations, extensions, and workflows 
 - `skills/pi-workflow/`: concise default working guidelines
 - `prompts/`: on-demand prompts for review, debugging, and architecture tasks
 - `docs/`: reference documentation for code exploration, external projects, and security boundaries
+- `docs/external-memory.md`: proposed synced-folder external-memory design
+- `docs/external-memory-test-plan.md`: verification plan for external memory
 - `settings.example.json`: example project-level Pi package configuration
 
 ## Prerequisites
