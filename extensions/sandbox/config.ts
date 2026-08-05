@@ -11,8 +11,6 @@ export interface SandboxConfig extends SandboxRuntimeConfig {
 
 export interface LoadedSandboxConfig {
   config: SandboxConfig;
-  globalPath: string;
-  projectPath: string;
   loadedFrom: string[];
   warnings: string[];
 }
@@ -181,7 +179,7 @@ export function loadSandboxConfig(
     warnings.push(`Ignored untrusted project configuration: ${projectPath}`);
   }
 
-  return { config, globalPath, projectPath, loadedFrom, warnings };
+  return { config, loadedFrom, warnings };
 }
 
 function mergeSection(
