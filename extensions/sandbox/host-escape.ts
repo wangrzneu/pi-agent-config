@@ -1,11 +1,15 @@
 /**
- * Detect git commands that touch a remote (push, pull, fetch, clone,
- * ls-remote, submodule update) in a bash command line.
+ * Detect commands that must run on the host instead of inside the sandbox:
  *
- * These operations need network and, for https remotes, Keychain
- * credentials — both restricted inside the sandbox. They are promoted to
- * host execution after explicit user confirmation instead of failing inside
- * the sandbox.
+ * 1. git commands that touch a remote (push, pull, fetch, clone, ls-remote,
+ *    submodule update)
+ * 2. gh (GitHub CLI) invocations — every gh subcommand talks to api.github.com
+ *    and needs the user's gh auth token / Keychain, which are restricted
+ *    inside the sandbox
+ *
+ * These operations need network and, for https remotes, Keychain credentials —
+ * both restricted inside the sandbox. They are promoted to host execution after
+ * explicit user confirmation instead of failing inside the sandbox.
  *
  * Matching segments the whole line by &&/;/| (respecting quotes), so
  * `cd /repo && git push` and `echo hi; git fetch` are detected, not just a
@@ -14,11 +18,12 @@
  * Literal strings inside plain echo/printf arguments are not treated as
  * commands, which avoids false positives.
  */
-export function isRemoteGitCommand(command: string): boolean {
+export function needsHostExecution(command: string): boolean {
   for (const segment of splitCommandSegments(command)) {
     if (isRemoteGitSegment(segment)) return true;
+    if (isGhSegment(segment)) return true;
     const inner = unwrapShellC(segment);
-    if (inner !== undefined && isRemoteGitCommand(inner)) return true;
+    if (inner !== undefined && needsHostExecution(inner)) return true;
   }
   return false;
 }
@@ -30,8 +35,17 @@ const REMOTE_PATTERN = new RegExp(
   `^${GIT_BIN_PREFIX}${GIT_OPTIONS}\\s+${REMOTE_SUBCOMMANDS}(?:\\s|$)`,
 );
 
+// gh (GitHub CLI): every subcommand (pr, issue, repo, api, auth, run, ...) is a
+// network operation against api.github.com. `/usr/local/bin/gh ...` works too;
+// `mygh ...` and `echo gh` do not match.
+const GH_PATTERN = new RegExp("^[\\w./@+-]+/gh(?:\\s|$)|^gh(?:\\s|$)");
+
 function isRemoteGitSegment(segment: string): boolean {
   return REMOTE_PATTERN.test(segment);
+}
+
+function isGhSegment(segment: string): boolean {
+  return GH_PATTERN.test(segment);
 }
 
 /**

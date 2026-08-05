@@ -373,7 +373,7 @@ test("find, ls, and grep reads outside the workspace are gated", async () => {
   }
 });
 
-test("remote git operations without approval are rejected instead of failing in the sandbox", async () => {
+test("remote git and gh operations without approval are rejected instead of failing in the sandbox", async () => {
   const fake = createRuntime();
   const harness = createHarness(fake.runtime);
   harness.ctx.cwd = process.cwd();
@@ -384,16 +384,19 @@ test("remote git operations without approval are rejected instead of failing in 
     "git push --dry-run origin main",
     "git pull origin main",
     "git fetch origin",
+    "gh pr create",
+    "gh repo create my-repo --public",
+    "gh api user",
   ]) {
     await assert.rejects(
       harness.bashTool.execute(
-        "remote-git-call",
+        "host-escape-call",
         { command },
         undefined,
         undefined,
         harness.ctx,
       ),
-      /Remote git operation was not approved/,
+      /not approved/,
     );
   }
 });

@@ -184,7 +184,7 @@ section; git identity → injected env (Decision 5).
 
 - `git submodule update` is treated as remote; `git bundle` and other
   edge transports are not — revisit if they become common.
-- The `bash -c` unwrap in `isRemoteGitCommand` is intentionally shallow
+- The `bash -c` unwrap in `needsHostExecution` is intentionally shallow
   (single level) to avoid treating `echo "git push"` as a command.
 - Linux filesystem patterns are literal paths (no globs); the allowed-domain
   and deny-write lists must stay portable.

@@ -11,7 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { loadSandboxConfig, type LoadedSandboxConfig } from "./config.ts";
-import { isRemoteGitCommand } from "./git-host-escape.ts";
+import { needsHostExecution } from "./host-escape.ts";
 import { loadGitIdentity, type GitIdentity } from "./git-identity.ts";
 import {
   createSandboxedBashOperations,
@@ -109,20 +109,21 @@ export function registerSandboxExtension(
       }
 
       const command = String(params.command ?? "");
-      // Remote git operations (push, pull, fetch, clone, ls-remote) need
-      // network and, for https remotes, Keychain credentials — both restricted
-      // inside the sandbox. Confirm and run them on the host instead.
-      if (state.mode === "sandboxed" && isRemoteGitCommand(command)) {
+      // Remote git operations (push, pull, fetch, clone, ls-remote) and gh
+      // (GitHub CLI) subcommands need network and host credentials (Keychain /
+      // gh auth token) — both restricted inside the sandbox. Confirm and run
+      // them on the host instead.
+      if (state.mode === "sandboxed" && needsHostExecution(command)) {
         if (!ctx.hasUI || ctx.mode !== "tui") {
           throw new Error(
-            "Remote git operations require interactive approval; run it in your own terminal or approve in the Pi TUI.",
+            "Remote git and gh operations require interactive approval; run it in your own terminal or approve in the Pi TUI.",
           );
         }
         const approved = await ctx.ui.confirm(
-          "Run this git operation on the host?",
-          "Keychain credentials and direct network are unavailable inside the sandbox, so remote git operations are executed on the host after approval.\n\n" + command,
+          "Run this operation on the host?",
+          "Keychain/gh credentials and direct network are unavailable inside the sandbox, so remote git and gh operations are executed on the host after approval.\n\n" + command,
         );
-        if (!approved) throw new Error("Remote git operation was not approved.");
+        if (!approved) throw new Error("Operation was not approved.");
         const hostTool = createBashToolDefinition(ctx.cwd, { operations: createLocalBashOperations() });
         return hostTool.execute(id, params, signal, onUpdate, ctx);
       }
