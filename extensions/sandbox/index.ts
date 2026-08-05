@@ -4,12 +4,14 @@ import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox
 import {
   CONFIG_DIR_NAME,
   createBashToolDefinition,
+  createLocalBashOperations,
   getAgentDir,
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { loadSandboxConfig, type LoadedSandboxConfig } from "./config.ts";
+import { isGitPushCommand } from "./git-push-escape.ts";
 import { loadGitIdentity, type GitIdentity } from "./git-identity.ts";
 import {
   createSandboxedBashOperations,
@@ -104,6 +106,24 @@ export function registerSandboxExtension(
     async execute(id, params, signal, onUpdate, ctx) {
       if (state.mode === "blocked" || state.mode === "starting") {
         throw new Error(`Sandboxed bash is unavailable: ${state.reason}`);
+      }
+
+      const command = String(params.command ?? "");
+      // git push cannot authenticate inside the sandbox (Keychain access is
+      // blocked), so confirm and run it on the host where credentials work.
+      if (state.mode === "sandboxed" && isGitPushCommand(command)) {
+        if (!ctx.hasUI || ctx.mode !== "tui") {
+          throw new Error(
+            "git push requires interactive approval; run it in your own terminal or approve in the Pi TUI.",
+          );
+        }
+        const approved = await ctx.ui.confirm(
+          "Run git push on the host?",
+          "Keychain credentials are unavailable inside the sandbox, so pushes are executed on the host after approval.\n\n" + command,
+        );
+        if (!approved) throw new Error("git push was not approved.");
+        const hostTool = createBashToolDefinition(ctx.cwd, { operations: createLocalBashOperations() });
+        return hostTool.execute(id, params, signal, onUpdate, ctx);
       }
 
       const tool = state.mode === "sandboxed"

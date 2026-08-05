@@ -105,6 +105,10 @@ The rest of the global configuration (`~/.config/git`, credential helpers, URL r
 
 Credentials for `git push` remain governed by the `credentials` section.
 
+### git push authentication
+
+`git push` cannot authenticate inside the sandbox: the default `osxkeychain` credential helper cannot reach the user's Keychain, so GitHub credentials are unavailable (`could not read Username ... Device not configured`). When a `git push` command is detected, the extension asks for confirmation and then runs it **on the host** (where Keychain and network are available), instead of letting it fail inside the sandbox. Pushes therefore keep working and stay approval-gated; declines fail closed.
+
 ### Registry and auth configuration
 
 User-level npm and pip configuration files are bypassed (npm emits a loud failure when its userconfig is unreadable). To use a mirror, private registry, or package-token auth inside the sandbox, put the configuration in a project-level file under the workspace — `.npmrc` or a `pip.conf` in the project — which is readable and writable like any workspace file.

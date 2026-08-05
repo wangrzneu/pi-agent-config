@@ -373,6 +373,25 @@ test("find, ls, and grep reads outside the workspace are gated", async () => {
   }
 });
 
+test("git push without approval is rejected instead of failing in the sandbox", async () => {
+  const fake = createRuntime();
+  const harness = createHarness(fake.runtime);
+  harness.ctx.cwd = process.cwd();
+  harness.ctx.ui.confirm = async () => false;
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  await assert.rejects(
+    harness.bashTool.execute(
+      "push-call",
+      { command: "git push --dry-run origin main" },
+      undefined,
+      undefined,
+      harness.ctx,
+    ),
+    /git push was not approved/,
+  );
+});
+
 test("/sandbox allow-read grants a path for the session", async () => {
   const externalRoot = await mkdtemp(join(tmpdir(), "pi-sandbox-command-"));
   const externalFile = join(externalRoot, "outside.txt");
