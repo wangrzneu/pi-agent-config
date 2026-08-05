@@ -109,7 +109,7 @@ Credentials for `git push` remain governed by the `credentials` section.
 
 ### Remote git and gh operations run on the host
 
-Remote git operations cannot fully work inside the sandbox: the default `osxkeychain` credential helper cannot reach the user's Keychain (https remotes fail with `could not read Username ... Device not configured`), and direct network is channeled through the sandbox proxy. When a remote git command is detected (`push`, `pull`, `fetch`, `clone`, `ls-remote`) — or a `gh` (GitHub CLI) subcommand, which always talks to api.github.com and needs the user's gh auth token — the extension asks for confirmation and runs it **on the host**, where Keychain, git identity, gh auth, and network are available. Operations therefore keep working and stay approval-gated; declines fail closed.
+Remote git operations cannot fully work inside the sandbox: the default `osxkeychain` credential helper cannot reach the user's Keychain (https remotes fail with `could not read Username ... Device not configured`), and direct network is channeled through the sandbox proxy. When a remote git command is detected (`push`, `pull`, `fetch`, `clone`, `ls-remote`) — or a `gh` (GitHub CLI) subcommand, which always talks to api.github.com and needs the user's gh auth token — the extension asks for confirmation and runs it **on the host**, where Keychain, git identity, gh auth, and network are available. Commands wrapped by `sudo`, `nohup`, `env KEY=VAL`, `command`, or `exec` are detected too (`sudo gh pr create`, `sudo git push`). Operations therefore keep working and stay approval-gated; declines fail closed.
 
 ### Registry and auth configuration
 

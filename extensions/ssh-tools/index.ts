@@ -86,7 +86,7 @@ interface SshRunOptions extends ProcessOptions {
   policy?: ConnectionRetryPolicy;
 }
 
-class SshSession {
+export class SshSession {
   readonly authorization = new SshAuthorization();
   readonly jobs = new Map<string, JobRecord>();
   /** Hosts whose detached jobs may read the remote login profile in this session. */
@@ -244,8 +244,8 @@ class SshSession {
     this.sudoPasswords.clear();
   }
 
-  clearTurnAuthorization(): void {
-    this.authorization.clearTurnGrants();
+  revokeCapabilityGrants(): void {
+    this.authorization.clearGrants();
   }
 
   resetAuthorization(): void {
@@ -255,8 +255,14 @@ class SshSession {
 }
 
 export default function sshToolsExtension(pi: ExtensionAPI): void {
+  registerSshToolsExtension(pi);
+}
+
+export function registerSshToolsExtension(
+  pi: ExtensionAPI,
+  session: SshSession = new SshSession(),
+): void {
   const activation = new SshToolActivation(pi);
-  const session = new SshSession();
 
   const syncJobs = () => {
     const running = [...session.jobs.values()].filter((job) => job.state === "running").length;
@@ -266,7 +272,7 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "ssh_enable",
     label: "Enable SSH tools",
-    description: "Authorize one SSH host and selected capabilities for this agent run, with bounded connection retry settings.",
+    description: "Authorize one SSH host and selected capabilities for this session, with bounded connection retry settings.",
     promptSnippet: "Use ssh_enable before remote SSH work to activate the required capability groups",
     parameters: Type.Object({
       host: HOST,
@@ -616,7 +622,7 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
       const action = args.trim().toLowerCase();
       if (action === "off") {
         activation.setEnabled(false);
-        session.clearTurnAuthorization();
+        session.revokeCapabilityGrants();
         session.clearSecrets();
         ctx.ui.notify("SSH tools disabled; remote jobs continue running.", "info");
         return;
@@ -663,7 +669,7 @@ function authorizationMessage(
     jobs: "start detached remote jobs",
   };
   const grants = capabilities.map((capability) => `• ${labels[capability]}`).join("\n");
-  return `Allow ${host} for this agent run?\n\n${grants}\n\nConnection timeout: ${policy.connectTimeoutSeconds}s\nConnection retries: ${policy.retries}`;
+  return `Allow ${host} for this session?\n\n${grants}\n\nConnection timeout: ${policy.connectTimeoutSeconds}s\nConnection retries: ${policy.retries}`;
 }
 
 async function requestPassword(ctx: ExtensionContext, title: string): Promise<string> {

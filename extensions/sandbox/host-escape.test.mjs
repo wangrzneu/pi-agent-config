@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   needsHostExecution,
   splitCommandSegments,
+  stripCommandWrappers,
   unwrapShellC,
 } from "./host-escape.ts";
 
@@ -55,6 +56,34 @@ test("detects gh in any command segment and inside wrappers", () => {
   assert.equal(needsHostExecution("git status && gh pr view"), true);
   assert.equal(needsHostExecution('bash -c "gh repo create"'), true);
   assert.equal(needsHostExecution('bash -c "cd /repo && gh issue list"'), true);
+});
+
+test("detects gh and remote git behind command wrappers", () => {
+  assert.equal(needsHostExecution("sudo gh pr create"), true);
+  assert.equal(needsHostExecution("sudo -u deploy gh repo create my-repo --public"), true);
+  assert.equal(needsHostExecution("sudo -n gh auth login"), true);
+  assert.equal(needsHostExecution("nohup gh api user > /tmp/gh.out 2>&1 &"), true);
+  assert.equal(needsHostExecution("command gh pr view"), true);
+  assert.equal(needsHostExecution("exec gh release create v1.0.0"), true);
+  assert.equal(needsHostExecution("env GH_TOKEN=xxx gh auth status"), true);
+  assert.equal(needsHostExecution("sudo git push origin main"), true);
+  assert.equal(needsHostExecution("nohup git fetch origin"), true);
+  assert.equal(needsHostExecution("sudo nohup git push"), true);
+});
+
+test("stripCommandWrappers removes wrappers but not commands", () => {
+  assert.equal(stripCommandWrappers("sudo gh pr create"), "gh pr create");
+  assert.equal(stripCommandWrappers("sudo -u deploy gh pr create"), "gh pr create");
+  assert.equal(stripCommandWrappers("sudo -n git push"), "git push");
+  assert.equal(stripCommandWrappers("nohup gh api user"), "gh api user");
+  assert.equal(stripCommandWrappers("command git fetch"), "git fetch");
+  assert.equal(stripCommandWrappers("exec gh pr create"), "gh pr create");
+  assert.equal(stripCommandWrappers("env GH_TOKEN=x GH_HOST=git.company gh auth status"), "gh auth status");
+  assert.equal(stripCommandWrappers("sudo nohup git push"), "git push");
+  // Non-wrapper prefixes are untouched
+  assert.equal(stripCommandWrappers("pip install gh"), "pip install gh");
+  assert.equal(stripCommandWrappers("cd /repo && git push"), "cd /repo && git push");
+  assert.equal(stripCommandWrappers("echo gh pr create"), "echo gh pr create");
 });
 
 test("does not match local-only git commands, non-gh words, or literal strings", () => {

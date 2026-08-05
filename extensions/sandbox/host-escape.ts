@@ -13,19 +13,28 @@
  *
  * Matching segments the whole line by &&/;/| (respecting quotes), so
  * `cd /repo && git push` and `echo hi; git fetch` are detected, not just a
- * leading `git push`. A `bash -c "..."` (or sh -c) wrapper is unwrapped once
- * and its quoted content checked recursively, so `bash -c "git push"` works.
- * Literal strings inside plain echo/printf arguments are not treated as
- * commands, which avoids false positives.
+ * leading `git push`. Leading command wrappers (`sudo`, `nohup`, `command`,
+ * `exec`, `env KEY=VAL`) are stripped so `sudo gh pr create` and
+ * `sudo git push` are detected too. A `bash -c "..."` (or sh -c) wrapper is
+ * unwrapped once and its quoted content checked recursively, so
+ * `bash -c "git push"` works. Literal strings inside plain echo/printf
+ * arguments are not treated as commands, which avoids false positives.
  */
 export function needsHostExecution(command: string): boolean {
   for (const segment of splitCommandSegments(command)) {
-    if (isRemoteGitSegment(segment)) return true;
-    if (isGhSegment(segment)) return true;
+    if (isHostExecutedSegment(segment)) return true;
     const inner = unwrapShellC(segment);
     if (inner !== undefined && needsHostExecution(inner)) return true;
   }
   return false;
+}
+
+function isHostExecutedSegment(segment: string): boolean {
+  // Commands are often wrapped: `sudo git push`, `nohup gh pr create`,
+  // `env GH_TOKEN=x gh auth status`, `command git fetch`. Strip the leading
+  // wrapper so the wrapped command is still detected.
+  const stripped = stripCommandWrappers(segment);
+  return isRemoteGitSegment(stripped) || isGhSegment(stripped);
 }
 
 const GIT_BIN_PREFIX = "(?:[\\w./@+-]+/)*git";
@@ -46,6 +55,71 @@ function isRemoteGitSegment(segment: string): boolean {
 
 function isGhSegment(segment: string): boolean {
   return GH_PATTERN.test(segment);
+}
+
+/**
+ * Strip leading command wrappers (`sudo`, `nohup`, `command`, `exec`, `env
+ * KEY=VAL ...`) from a segment so wrapped commands are recognized. Repeats up
+ * to a few times so nested wrappers (`sudo nohup git push`) resolve too.
+ *
+ * Option flags after a wrapper keyword are skipped. `sudo` option flags that
+ * consume their own argument (`-u user`, `-g group`, `-p prompt`, ...) are
+ * skipped together with that argument; other wrappers' flags are skipped
+ * individually. Anything else ends the scan at the command word.
+ */
+export function stripCommandWrappers(command: string): string {
+  let stripped = command.trim();
+  for (let pass = 0; pass < 4; pass += 1) {
+    const next = stripOnce(stripped);
+    if (next === stripped) return stripped;
+    stripped = next;
+  }
+  return stripped;
+}
+
+const SUDO_ARGUMENT_FLAGS = new Set([
+  "-u", "-g", "-p", "-h", "-U", "-R", "-r", "-t", "-T", "-C", "-D",
+]);
+
+/** Strip a single wrapper keyword and its flags from the front of a command. */
+function stripOnce(segment: string): string {
+  const words = segment.split(/\s+/);
+  const n = words.length;
+  let i = 0;
+  while (i < n) {
+    const word = words[i];
+    if (word === "env") {
+      i += 1;
+      while (i < n && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i])) i += 1;
+      i = skipFlags(words, i, n, false);
+      continue;
+    }
+    if (word === "sudo" || word === "nohup" || word === "command" || word === "exec") {
+      i = skipFlags(words, i + 1, n, word === "sudo");
+      continue;
+    }
+    break;
+  }
+  return words.slice(i).join(" ");
+}
+
+function skipFlags(
+  words: readonly string[],
+  start: number,
+  end: number,
+  sudo: boolean,
+): number {
+  let i = start;
+  while (i < end) {
+    const word = words[i];
+    if (!word.startsWith("-") || word === "-") break;
+    if (sudo && SUDO_ARGUMENT_FLAGS.has(word)) {
+      i += 2; // flag plus its argument, e.g. `sudo -u deploy gh ...`
+      continue;
+    }
+    i += 1;
+  }
+  return i;
 }
 
 /**

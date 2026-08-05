@@ -5,7 +5,7 @@ import {
   SshAuthorization,
 } from "./authorization.ts";
 
-test("grants capabilities per host for one agent run", () => {
+test("grants capabilities per host for one session", () => {
   const authorization = new SshAuthorization();
   assert.deepEqual(authorization.missingCapabilities("staging", ["exec", "files"]), ["exec", "files"]);
 
@@ -14,9 +14,9 @@ test("grants capabilities per host for one agent run", () => {
   assert.deepEqual(authorization.missingCapabilities("staging", ["exec", "files"]), ["files"]);
   assert.throws(() => authorization.assertCapability("staging", "files"), /not authorized/);
 
-  authorization.clearTurnGrants();
+  authorization.clearGrants();
   assert.equal(authorization.isConnected("staging"), true);
-  assert.throws(() => authorization.assertCapability("staging", "exec"), /agent run/);
+  assert.throws(() => authorization.assertCapability("staging", "exec"), /this session/);
 });
 
 test("stores bounded connection policy per host and resets all authorization", () => {
