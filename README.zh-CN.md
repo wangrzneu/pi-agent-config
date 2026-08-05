@@ -17,6 +17,7 @@
 - `docs/`：代码探索、外部项目和安全边界参考文档
 - `docs/external-memory.md`：同步目录外部记忆设计
 - `docs/external-memory-test-plan.md`：外部记忆验证方案
+- `docs/sandbox-design.md`：sandbox 扩展的架构与设计决策
 - `settings.example.json`：项目级 Pi package 配置示例
 
 ## 前置条件

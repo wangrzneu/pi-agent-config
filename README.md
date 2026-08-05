@@ -22,6 +22,7 @@ External memory capture is opt-in per project: set `PI_AGENT_MEMORY_ROOT` to an 
 - `docs/`: reference documentation for code exploration, external projects, and security boundaries
 - `docs/external-memory.md`: proposed synced-folder external-memory design
 - `docs/external-memory-test-plan.md`: verification plan for external memory
+- `docs/sandbox-design.md`: architecture and design decisions for the sandbox extension
 - `settings.example.json`: example project-level Pi package configuration
 
 ## Prerequisites

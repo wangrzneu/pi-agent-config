@@ -2,6 +2,8 @@
 
 The sandbox extension replaces Pi's built-in `bash` execution backend and intercepts user `!` commands. It uses `@anthropic-ai/sandbox-runtime` to enforce filesystem and network policy with macOS Seatbelt (`sandbox-exec`) or Linux bubblewrap.
 
+For the architecture and the reasoning behind each behavior, see [`sandbox-design.md`](sandbox-design.md).
+
 ## Design goals
 
 The defaults are intended for everyday, iterative coding:
