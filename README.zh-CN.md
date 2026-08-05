@@ -1,28 +1,73 @@
-# pi-agent-config
+<div align="center">
+
+# 🧰 Pi Agent Config
+
+**为 [Pi Coding Agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) 量身定制的个人配置、扩展与工作流**
 
 [English](README.md) | 简体中文
 
-个人维护的 Pi Coding Agent 配置、扩展与工作流。
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.19-brightgreen.svg)](https://nodejs.org/)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-9cf.svg)](#)
+[![Pi Package](https://img.shields.io/badge/Pi%20Package-ready-ff69b4.svg)](#)
 
-## 内容
+一套经过精心整理的扩展、技能与提示词，让 Pi Coding Agent **更安全**、**更专注**、**更高效** —— 自带沙箱、规划模式与丰富的 TUI 工具集。
 
-- `extensions/plan-mode/`：只读规划模式
-- `extensions/markdown-viewer/`：在 Pi TUI 中打开并渲染本地 Markdown 文件
-- `extensions/work-status/`：在 Pi TUI 中显示当前任务和工作类型
-- `extensions/btw/`：临时提问，不改变主会话
-- `extensions/ssh-tools/`：按需发现的 SSH 执行、文件传输和远程作业工具
-- `extensions/sandbox/`：对本地 shell 命令实施 fail-closed 的操作系统级沙箱
-- `skills/pi-workflow/`：精简的默认工作规范
-- `prompts/`：按需使用的 review、debugging 和 architecture 提示词
-- `docs/`：代码探索、外部项目和安全边界参考文档
-- `docs/external-memory.md`：同步目录外部记忆设计
-- `docs/external-memory-test-plan.md`：外部记忆验证方案
-- `docs/sandbox-design.md`：sandbox 扩展的架构与设计决策
-- `settings.example.json`：项目级 Pi package 配置示例
+</div>
 
-## 前置条件
+---
 
-需要 Node.js 22.19.0 或更高版本。安装 Pi：
+## ✨ 功能一览
+
+| 功能 | 说明 |
+|---|---|
+| 🔒 **规划模式** | 只读的规划模式，先思考再行动 |
+| 📖 **Markdown 阅读器** | 在 Pi TUI 中渲染本地 Markdown——支持搜索、图片与 Mermaid |
+| 🏷️ **工作状态** | 在 TUI 页脚实时显示任务摘要与工作类型 |
+| 💬 **临时提问** | `/btw` 侧问题，绝不污染主会话 |
+| 🌐 **SSH 工具** | 轻量、按能力细分的 SSH 执行、传输与远程作业 |
+| 🛡️ **沙箱** | 对本地 shell 命令实施 fail-closed 的操作系统级沙箱 |
+| 🧠 **外部记忆** | 可选的项目级同步目录记忆，压缩时捕获、两阶段召回 |
+| 🧭 **工作流 skill** | 精简的默认工作规范 |
+| 🧩 **提示词** | 按需使用的 review / debugging / architecture 提示词 |
+| 📚 **文档** | 代码探索、外部项目与安全边界参考文档 |
+
+## 📦 内容
+
+| 路径 | 说明 |
+|---|---|
+| `extensions/plan-mode/` | 只读规划模式 |
+| `extensions/markdown-viewer/` | 在 Pi TUI 中打开并渲染本地 Markdown 文件 |
+| `extensions/work-status/` | 在 Pi TUI 中显示当前任务和工作类型 |
+| `extensions/btw/` | 临时提问，不改变主会话 |
+| `extensions/ssh-tools/` | 按需发现的 SSH 执行、文件传输和远程作业工具 |
+| `extensions/sandbox/` | 对本地 shell 命令实施 fail-closed 的操作系统级沙箱 |
+| `extensions/external-memory/` | 可选的项目级同步目录记忆，压缩时捕获、两阶段召回 |
+| `skills/pi-workflow/` | 精简的默认工作规范 |
+| `prompts/` | 按需使用的 review、debugging 和 architecture 提示词 |
+| `docs/` | 代码探索、外部项目和安全边界参考文档 |
+| `settings.example.json` | 项目级 Pi package 配置示例 |
+
+> 💡 **外部记忆**按项目可选启用：先将 `PI_AGENT_MEMORY_ROOT` 设为绝对路径，再在该项目中运行
+> `/memory on`。证据以不可变的 JSONL 分块写入，通过 `/memory search` 或 `memory_recall` 工具召回。
+> 详见 [`docs/external-memory.md`](docs/external-memory.md)。
+
+### 📚 文档
+
+| 文档 | 主题 |
+|---|---|
+| `docs/external-memory.md` | 同步目录外部记忆设计 |
+| `docs/external-memory-test-plan.md` | 外部记忆验证方案 |
+| `docs/sandbox.md` | 沙箱行为、配置与安全边界 |
+| `docs/sandbox-design.md` | sandbox 扩展的架构与设计决策 |
+| `docs/ssh-tools.md` | SSH 工具要求、行为与安全边界 |
+| `docs/security.md` | 安全模型概览 |
+| `docs/exploration.md` | 代码探索指引 |
+| `docs/external-projects.md` | 处理外部项目 |
+
+## 📋 前置条件
+
+需要 Node.js **22.19.0 或更高版本**。安装 Pi：
 
 ```bash
 npm install -g --ignore-scripts @earendil-works/pi-coding-agent
@@ -35,9 +80,9 @@ node --version
 pi --version
 ```
 
-## 安装
+## 🚀 安装
 
-### 全局安装
+### 🌍 全局安装
 
 安装后对所有项目生效：
 
@@ -45,7 +90,7 @@ pi --version
 pi install git:github.com/wangrzneu/pi-agent-config
 ```
 
-### 项目安装
+### 📁 项目安装
 
 在目标项目目录执行，配置会写入 `.pi/settings.json`：
 
@@ -55,7 +100,7 @@ pi install -l git:github.com/wangrzneu/pi-agent-config
 
 也可以把 `settings.example.json` 的内容合并到项目的 `.pi/settings.json`。
 
-### 本地目录
+### 🗂️ 本地目录
 
 开发或使用本地检出版本时，先安装 package 依赖：
 
@@ -71,7 +116,7 @@ pi install -l /absolute/path/to/pi-agent-config
 pi -e /absolute/path/to/pi-agent-config
 ```
 
-## 验证
+## ✅ 验证
 
 ```bash
 pi list
@@ -80,35 +125,55 @@ pi
 
 启动后使用 `/plan` 切换规划模式。
 
+## 🧰 使用指南
+
+### 🛡️ 沙箱化的本地命令
+
 在 macOS 和 Linux 上，本地 `bash` 与用户 `!` 命令会进入 fail-closed 的操作系统级沙箱。
 默认只允许读写工作区，同时允许访问常见包仓库、启动本地测试服务，并为 git/编译器提供操作系统临时目录。
-Python 操作应使用工作区的 `.venv`（`pi-workflow` skill 工作约束）：先 `python3 -m venv .venv` 创建，
-再在用到 `python`/`pip` 的同一条命令里 `source .venv/bin/activate`（每次 bash 调用都是新 shell），
-让 pip 与脚本避开 home 目录依赖；详见 [`docs/sandbox.md`](docs/sandbox.md) 的 “Python environments”。
-访问工作区外的用户文件必须通过 `sandbox_authorize_read`、`sandbox_authorize_write` 或
-`/sandbox allow-read|allow-write <路径>` 获得当前 session 的明确授权；Pi 的直接读取、搜索、目录、写入和编辑工具
-也使用相同权限门。前台命令没有隐式超时，并支持流式输出和进程组取消，适合耗时较长的构建与测试。
-使用 `/sandbox` 查看生效策略，修改配置后执行 `/sandbox reload`；只有明确传入 `--no-sandbox` 才会绕过沙箱。
-要求、配置与安全边界见 [`docs/sandbox.md`](docs/sandbox.md)。
+
+- 🐍 **Python** 操作应使用工作区的 `.venv`（`pi-workflow` skill 工作约束）：先
+  `python3 -m venv .venv` 创建，再在用到 `python`/`pip` 的同一条命令里
+  `source .venv/bin/activate`（每次 bash 调用都是新 shell），让 pip 与脚本避开 home 目录依赖；
+  详见 [`docs/sandbox.md`](docs/sandbox.md) 的 “Python environments”。
+- 🔐 **工作区外的用户文件**必须通过 `sandbox_authorize_read`、`sandbox_authorize_write` 或
+  `/sandbox allow-read|allow-write <路径>` 获得当前 session 的明确授权；Pi 的直接读取、搜索、
+  目录、写入和编辑工具也使用相同权限门。
+- ⏱️ 前台命令没有隐式超时，并支持流式输出和进程组取消，适合耗时较长的构建与测试。
+- ⌨️ 使用 `/sandbox` 查看生效策略，修改配置后执行 `/sandbox reload`；只有明确传入
+  `--no-sandbox` 才会绕过沙箱。
+
+### 💬 `/btw` 临时提问
 
 使用 `/btw <问题>` 发起一次能看到当前会话上下文的临时提问。它使用当前模型，并可通过隔离的
 只读 `read`、`grep`、`find` 和 `ls` 工具查看或搜索文件。问题、回答和工具结果都不会写入主会话。
-每次调用只生成一个回答；新问题需要再次执行 `/btw <问题>`。
-无参数执行 `/btw` 可重新打开最近一次回答。回答视图支持滚动、左右切换历史、`c` 复制、
-`x` 清空，以及使用 `q`、`Esc`、`Enter` 或 `Space` 关闭。
 
-远程 SSH 工作默认只暴露一个轻量的 `ssh_enable` 工具。完成当前 Agent 运行的主机与能力授权后，模型只激活
-当前任务需要的能力组：前台命令执行、二进制安全的上传/下载，或者支持查询状态和取消的后台作业。
-一次授权覆盖对应能力组中的普通操作；新增能力、sudo 和取消作业仍需明确确认。连接超时、重试次数和
-指数退避可通过 `ssh_enable` 配置。需要 SSH 或 sudo 密码时，扩展通过遮罩输入读取，并且只保存在进程内存中，
-不会成为模型工具参数。连接重试包含可识别的认证失败和 Host Key 失败，但不会绕过 OpenSSH 的 Host Key 校验；
-对于启用账号锁定策略的系统，应设置较低的重试次数。使用 `/ssh-tools` 查看当前状态，或用
-`/ssh-tools off|on|reset` 控制功能。
-具体要求、行为和安全边界见 [`docs/ssh-tools.md`](docs/ssh-tools.md)。
+每次调用只生成一个回答；新问题需要再次执行 `/btw <问题>`。无参数执行 `/btw` 可重新打开
+最近一次回答。回答视图支持滚动、左右切换历史、`c` 复制、`x` 清空，以及使用 `q`、`Esc`、
+`Enter` 或 `Space` 关闭。
+
+### 🌐 远程 SSH 工作
+
+远程 SSH 工作默认只暴露一个轻量的 `ssh_enable` 工具。完成当前 Agent 运行的主机与能力授权后，
+模型只激活当前任务需要的能力组：前台命令执行、二进制安全的上传/下载，或者支持查询状态和
+取消的后台作业。
+
+- 一次授权覆盖对应能力组中的普通操作；新增能力、sudo 和取消作业仍需明确确认。
+- 连接超时、重试次数和指数退避可通过 `ssh_enable` 配置。
+- 🔑 需要 SSH 或 sudo 密码时，扩展通过遮罩输入读取，并且只保存在进程内存中，不会成为模型
+  工具参数。
+- 连接重试包含可识别的认证失败和 Host Key 失败，但不会绕过 OpenSSH 的 Host Key 校验；对于
+  启用账号锁定策略的系统，应设置较低的重试次数。
+- 使用 `/ssh-tools` 查看当前状态，或用 `/ssh-tools off|on|reset` 控制功能。
+  具体要求、行为和安全边界见 [`docs/ssh-tools.md`](docs/ssh-tools.md)。
+
+### 🏷️ 工作状态
 
 Agent 运行时，页脚会显示当前任务摘要及工作类型：设计、计划、实现、测试、评审、修复或探索。
 当前选中的模型会执行一次关闭扩展思考的短分类请求，工作提示则显示当前工具的具体操作。
 分类结果无效、请求失败或超时后不会回退，也不会显示工作状态。分类结果不会写入会话或主模型上下文。
+
+### 📖 Markdown 阅读器
 
 使用 `/md <path>` 或 `/markdown <path>` 打开本地 `.md`、`.markdown` 文件：
 
@@ -117,18 +182,21 @@ Agent 运行时，页脚会显示当前任务摘要及工作类型：设计、�
 /md "docs/design notes.md"
 ```
 
-阅读器支持方向键、`j`/`k` 滚动，`PageUp`/`PageDown` 翻页，`g`/`G`
-跳转首尾，并使用 `q` 或 `Esc` 关闭。其他功能：
+阅读器支持方向键、`j`/`k` 滚动，`PageUp`/`PageDown` 翻页，`g`/`G` 跳转首尾，
+并使用 `q` 或 `Esc` 关闭。其他功能：
 
 - `/` 输入正文搜索，`n`/`N` 跳转到下一个或上一个结果。
 - `d` 打开目录导航，只列出目录和 Markdown 文件。
 - `l` 或 `o` 打开链接列表；本地 Markdown 链接在阅读器内跳转，其他链接交给系统打开。
-- 自动渲染本地、HTTP(S) 和 data URL 中的 PNG、JPEG、GIF、WebP 图片；终端不支持图片协议时显示图片信息。
+- 自动渲染本地、HTTP(S) 和 data URL 中的 PNG、JPEG、GIF、WebP 图片；终端不支持图片协议时
+  显示图片信息。
 - 将 `mermaid` 代码块本地渲染为 Unicode 图表，不调用远程渲染服务。
 - `r` 手动刷新；文件变化后也会自动刷新。
 
-每份文档最多渲染 32 张图片，每张最多 8 MiB，远程图片请求 8 秒超时。远程图片会产生网络请求；不要用阅读器
-打开包含不可信跟踪图片的文档。
+> ⚠️ 每份文档最多渲染 32 张图片，每张最多 8 MiB，远程图片请求 8 秒超时。远程图片会产生网络
+> 请求；不要用阅读器打开包含不可信跟踪图片的文档。
+
+## 🧪 测试
 
 可以运行以下命令验证仓库中的回归测试：
 
@@ -136,7 +204,7 @@ Agent 运行时，页脚会显示当前任务摘要及工作类型：设计、�
 npm test
 ```
 
-## 更新与移除
+## 🔄 更新与移除
 
 ```bash
 pi update --extensions
@@ -150,27 +218,36 @@ pi remove git:github.com/wangrzneu/pi-agent-config
 pi remove -l git:github.com/wangrzneu/pi-agent-config
 ```
 
-## Token 使用
+## ⚡ Token 使用
 
 - 默认只加载精简的 `skills/pi-workflow/SKILL.md`。
 - `prompts/` 中的模板只在对应任务中按需使用。
 - `docs/` 是参考材料，不应自动加入每次任务的上下文。
 - plan mode 的模型提醒只在进入模式后注入一次；只读限制由工具拦截器持续执行。
-- 每个未缓存任务的工作状态会发起一次关闭思考的短模型请求，消耗少量 token，但不会把结果加入会话上下文。
-- 每个 `/btw` 问题会运行一个带有较小输出与工具调用预算的独立模型循环；只读工具结果是临时的，问答不会写入会话。
-- Markdown 阅读器、目录、搜索、图片和 Mermaid 都只在 TUI 扩展进程中处理，不会把内容加入模型上下文。
-- SSH 默认只暴露精简的 `ssh_enable` 选择器；主机/能力授权和能力工具仅在当前 Agent 运行中有效，作业状态和取消工具只为已跟踪作业保留。该过程不发起额外模型分类请求。
-- Sandbox 不会增加模型请求，也不会向会话写入持久内容；除沙箱化 bash 外，只暴露精简的读写授权工具。
+- 每个未缓存任务的工作状态会发起一次关闭思考的短模型请求，消耗少量 token，但不会把结果加入
+  会话上下文。
+- 每个 `/btw` 问题会运行一个带有较小输出与工具调用预算的独立模型循环；只读工具结果是临时的，
+  问答不会写入会话。
+- Markdown 阅读器、目录、搜索、图片和 Mermaid 都只在 TUI 扩展进程中处理，不会把内容加入模型
+  上下文。
+- SSH 默认只暴露精简的 `ssh_enable` 选择器；主机/能力授权和能力工具仅在当前 Agent 运行中
+  有效，作业状态和取消工具只为已跟踪作业保留。该过程不发起额外模型分类请求。
+- Sandbox 不会增加模型请求，也不会向会话写入持久内容；除沙箱化 bash 外，只暴露精简的读写
+  授权工具。
 
-## 设计原则
+## 🎯 设计原则
 
-1. 规划阶段默认只读。
-2. 硬约束放在扩展的工具拦截器中，行为偏好放在 skill 或按需 prompt 中。
-3. 详细流程放在文档中，避免增加默认上下文。
-4. 配置保持可移植，不绑定单一模型或 provider。
+1. **规划阶段默认只读。**
+2. **硬约束**放在扩展的工具拦截器中，**行为偏好**放在 skill 或按需 prompt 中。
+3. **详细流程**放在文档中，避免增加默认上下文。
+4. **配置保持可移植**，不绑定单一模型或 provider。
 
-## 安全提醒
+## 🔒 安全提醒
 
-本地命令沙箱只约束 shell 子进程，不会隔离 Pi 的直接文件工具、package 或扩展；Plan mode 也仍然只是防误操作机制。
-安装前请审查源码，处理真实凭据、生产代码或恶意项目时应使用容器、虚拟机或专用低权限用户。
-详见 [`docs/security.md`](docs/security.md)。
+本地命令沙箱只约束 shell 子进程，不会隔离 Pi 的直接文件工具、package 或扩展；Plan mode
+也仍然只是防误操作机制。安装前请审查源码，处理真实凭据、生产代码或恶意项目时应使用容器、
+虚拟机或专用低权限用户。详见 [`docs/security.md`](docs/security.md)。
+
+## 📄 License
+
+[MIT](LICENSE) © [Renzheng Wang](https://github.com/wangrzneu)
