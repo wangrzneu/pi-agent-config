@@ -89,7 +89,7 @@ interface SshRunOptions extends ProcessOptions {
 class SshSession {
   readonly authorization = new SshAuthorization();
   readonly jobs = new Map<string, JobRecord>();
-  /** Hosts whose detached jobs may read the remote login profile in this agent run. */
+  /** Hosts whose detached jobs may read the remote login profile in this session. */
   private readonly loginEnvironmentGranted = new Set<string>();
   private readonly sshPasswords = new Map<string, string>();
   private readonly sudoPasswords = new Map<string, string>();
@@ -246,11 +246,11 @@ class SshSession {
 
   clearTurnAuthorization(): void {
     this.authorization.clearTurnGrants();
-    this.loginEnvironmentGranted.clear();
   }
 
   resetAuthorization(): void {
     this.authorization.reset();
+    this.loginEnvironmentGranted.clear();
   }
 }
 
@@ -443,8 +443,8 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
       }
       // A login shell reads the remote user's home profile (~/.profile and
       // friends), which may produce side effects or warnings in job output.
-      // Ask once per host per agent run; declining runs the job in a plain
-      // shell without the login environment.
+      // Ask once per host per session (cleared by /ssh-tools reset); declining
+      // runs the job in a plain shell without the login environment.
       let login = true;
       if (!session.isLoginEnvironmentAuthorized(params.host)) {
         const approved = await getApproval(
