@@ -11,7 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { loadSandboxConfig, type LoadedSandboxConfig } from "./config.ts";
-import { isGitPushCommand } from "./git-push-escape.ts";
+import { isRemoteGitCommand } from "./git-host-escape.ts";
 import { loadGitIdentity, type GitIdentity } from "./git-identity.ts";
 import {
   createSandboxedBashOperations,
@@ -109,19 +109,20 @@ export function registerSandboxExtension(
       }
 
       const command = String(params.command ?? "");
-      // git push cannot authenticate inside the sandbox (Keychain access is
-      // blocked), so confirm and run it on the host where credentials work.
-      if (state.mode === "sandboxed" && isGitPushCommand(command)) {
+      // Remote git operations (push, pull, fetch, clone, ls-remote) need
+      // network and, for https remotes, Keychain credentials — both restricted
+      // inside the sandbox. Confirm and run them on the host instead.
+      if (state.mode === "sandboxed" && isRemoteGitCommand(command)) {
         if (!ctx.hasUI || ctx.mode !== "tui") {
           throw new Error(
-            "git push requires interactive approval; run it in your own terminal or approve in the Pi TUI.",
+            "Remote git operations require interactive approval; run it in your own terminal or approve in the Pi TUI.",
           );
         }
         const approved = await ctx.ui.confirm(
-          "Run git push on the host?",
-          "Keychain credentials are unavailable inside the sandbox, so pushes are executed on the host after approval.\n\n" + command,
+          "Run this git operation on the host?",
+          "Keychain credentials and direct network are unavailable inside the sandbox, so remote git operations are executed on the host after approval.\n\n" + command,
         );
-        if (!approved) throw new Error("git push was not approved.");
+        if (!approved) throw new Error("Remote git operation was not approved.");
         const hostTool = createBashToolDefinition(ctx.cwd, { operations: createLocalBashOperations() });
         return hostTool.execute(id, params, signal, onUpdate, ctx);
       }

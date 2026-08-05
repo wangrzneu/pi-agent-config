@@ -373,23 +373,29 @@ test("find, ls, and grep reads outside the workspace are gated", async () => {
   }
 });
 
-test("git push without approval is rejected instead of failing in the sandbox", async () => {
+test("remote git operations without approval are rejected instead of failing in the sandbox", async () => {
   const fake = createRuntime();
   const harness = createHarness(fake.runtime);
   harness.ctx.cwd = process.cwd();
   harness.ctx.ui.confirm = async () => false;
   await harness.handlers.get("session_start")({}, harness.ctx);
 
-  await assert.rejects(
-    harness.bashTool.execute(
-      "push-call",
-      { command: "git push --dry-run origin main" },
-      undefined,
-      undefined,
-      harness.ctx,
-    ),
-    /git push was not approved/,
-  );
+  for (const command of [
+    "git push --dry-run origin main",
+    "git pull origin main",
+    "git fetch origin",
+  ]) {
+    await assert.rejects(
+      harness.bashTool.execute(
+        "remote-git-call",
+        { command },
+        undefined,
+        undefined,
+        harness.ctx,
+      ),
+      /Remote git operation was not approved/,
+    );
+  }
 });
 
 test("/sandbox allow-read grants a path for the session", async () => {

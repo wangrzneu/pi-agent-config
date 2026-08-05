@@ -105,9 +105,9 @@ The rest of the global configuration (`~/.config/git`, credential helpers, URL r
 
 Credentials for `git push` remain governed by the `credentials` section.
 
-### git push authentication
+### Remote git operations run on the host
 
-`git push` cannot authenticate inside the sandbox: the default `osxkeychain` credential helper cannot reach the user's Keychain, so GitHub credentials are unavailable (`could not read Username ... Device not configured`). When a `git push` command is detected, the extension asks for confirmation and then runs it **on the host** (where Keychain and network are available), instead of letting it fail inside the sandbox. Pushes therefore keep working and stay approval-gated; declines fail closed.
+Remote git operations cannot fully work inside the sandbox: the default `osxkeychain` credential helper cannot reach the user's Keychain (https remotes fail with `could not read Username ... Device not configured`), and direct network is channeled through the sandbox proxy. When a remote git command is detected (`push`, `pull`, `fetch`, `clone`, `ls-remote`), the extension asks for confirmation and runs it **on the host**, where Keychain, git identity, and network are available. Operations therefore keep working and stay approval-gated; declines fail closed.
 
 ### Registry and auth configuration
 
