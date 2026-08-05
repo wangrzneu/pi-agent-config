@@ -10,6 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { loadSandboxConfig, type LoadedSandboxConfig } from "./config.ts";
+import { loadGitIdentity, type GitIdentity } from "./git-identity.ts";
 import {
   createSandboxedBashOperations,
   SandboxProcessTracker,
@@ -68,6 +69,7 @@ export function registerSandboxExtension(
   const writeAuthorization = new SandboxPathAuthorization(authOptions);
   const baseBash = createBashToolDefinition(process.cwd());
   let initialized = false;
+  let gitIdentity: GitIdentity | undefined;
   let state: SandboxState = { mode: "starting", reason: "waiting for session start" };
   const operations = createSandboxedBashOperations(runtime, tracker, () => {
     const filesystem = state.loaded?.config.filesystem;
@@ -85,7 +87,7 @@ export function registerSandboxExtension(
         ],
       },
     };
-  });
+  }, () => gitIdentity);
 
   pi.registerFlag("no-sandbox", {
     description: "Explicitly run local bash commands without OS-level sandboxing",
@@ -140,6 +142,9 @@ export function registerSandboxExtension(
   pi.on("session_start", async (_event, ctx) => {
     state = { mode: "starting", reason: "initializing" };
     initialized = false;
+    // Read the host git identity so sandboxed git commits inherit the user's
+    // ~/.gitconfig identity (home reads are denied inside the sandbox).
+    gitIdentity = loadGitIdentity();
     await Promise.all([
       readAuthorization.reset(ctx.cwd),
       writeAuthorization.reset(ctx.cwd),

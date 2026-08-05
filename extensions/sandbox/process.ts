@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
+import { gitIdentityEnv, type GitIdentity } from "./git-identity.ts";
 import { SANDBOX_TEMP_ROOT } from "./sandbox-paths.ts";
 
 const TERMINATION_GRACE_MS = 1_500;
@@ -41,6 +42,7 @@ export function createSandboxedBashOperations(
   runtime: SandboxCommandRuntime,
   tracker: SandboxProcessTracker,
   commandConfig?: () => Partial<SandboxRuntimeConfig> | undefined,
+  gitIdentity?: () => GitIdentity | undefined,
 ): BashOperations {
   return {
     async exec(command, cwd, { onData, signal, timeout, env }) {
@@ -61,7 +63,7 @@ export function createSandboxedBashOperations(
       const child = spawn("bash", ["-c", wrappedCommand], {
         cwd,
         detached: true,
-        env: codingCacheEnvironment(env ?? process.env),
+        env: codingCacheEnvironment(env ?? process.env, gitIdentity?.()),
         stdio: ["ignore", "pipe", "pipe"],
       });
       tracker.track(child);
@@ -105,9 +107,13 @@ export function createSandboxedBashOperations(
   };
 }
 
-export function codingCacheEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function codingCacheEnvironment(
+  env: NodeJS.ProcessEnv,
+  gitIdentity?: GitIdentity,
+): NodeJS.ProcessEnv {
   return {
     ...env,
+    ...gitIdentityEnv(gitIdentity),
     TMPDIR: join(SANDBOX_TEMP_ROOT, "tmp"),
     TMP: join(SANDBOX_TEMP_ROOT, "tmp"),
     TEMP: join(SANDBOX_TEMP_ROOT, "tmp"),

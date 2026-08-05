@@ -95,14 +95,15 @@ The child's `TMPDIR` is managed by the sandbox runtime (`/tmp/claude` by default
 
 ### Git identity and configuration
 
-Global git configuration (`~/.gitconfig`, `~/.config/git`, credential helpers) is intentionally isolated and not readable by default. Configure identity per repository inside the workspace so commits keep working:
+Sandboxed child shells cannot read `~/.gitconfig` (home reads are denied), so the extension reads the user's `user.name`/`user.email` on the host side at session start and injects them into every sandboxed shell as `GIT_AUTHOR_*`/`GIT_COMMITTER_*`. Git commits made through Pi therefore inherit the identity from `~/.gitconfig` automatically.
+
+The rest of the global configuration (`~/.config/git`, credential helpers, URL rewriting in `~/.gitconfig`) is intentionally isolated and not readable in the sandbox. When a command needs global settings, either configure them in the repository itself (`git config user.name/email`, repository-local excludes) or grant read access for the session:
 
 ```bash
-git config user.name "Your Name"
-git config user.email you@example.com
+/sandbox allow-read ~/.gitconfig
 ```
 
-Alternatively, grant read access to `~/.gitconfig` for the session with `/sandbox allow-read ~/.gitconfig` — this also restores global settings such as `insteadOf` URL rewriting and excludes files. Credentials for `git push` remain governed by the `credentials` section.
+Credentials for `git push` remain governed by the `credentials` section.
 
 ### Registry and auth configuration
 

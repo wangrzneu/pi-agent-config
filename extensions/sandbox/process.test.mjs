@@ -36,6 +36,24 @@ test("coding caches are redirected into a writable process-scoped temp area", ()
   assert.match(env.GOPATH, /pi-sandbox-\d+-[0-9a-f-]+\/cache\/go-path$/);
 });
 
+test("sandboxed bash injects the git author identity into the child", async () => {
+  const fake = createRuntime();
+  const operations = createSandboxedBashOperations(
+    fake.runtime,
+    new SandboxProcessTracker(),
+    undefined,
+    () => ({ name: "Jane Doe", email: "jane@example.com" }),
+  );
+  const chunks = [];
+  const result = await operations.exec(
+    "printf '%s|<%s>' \"$GIT_AUTHOR_NAME\" \"$GIT_AUTHOR_EMAIL\"",
+    process.cwd(),
+    { onData: (chunk) => chunks.push(chunk) },
+  );
+  assert.equal(result.exitCode, 0);
+  assert.equal(Buffer.concat(chunks).toString("utf8"), "Jane Doe|<jane@example.com>");
+});
+
 test("sandboxed bash streams output and preserves the child exit code", async () => {
   const fake = createRuntime();
   const operations = createSandboxedBashOperations(
