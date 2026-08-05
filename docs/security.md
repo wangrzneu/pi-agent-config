@@ -46,7 +46,7 @@ The allowlist should stay narrow. New commands or flags require tests showing bo
 
 ## SSH tools
 
-- A host and each requested capability group must be explicitly authorized for the current agent run. Grants expire when the agent settles and fail closed in print and RPC modes.
+- A host and each requested capability group must be explicitly authorized once per session. Grants persist until `/ssh-tools off|reset` revokes them and fail closed in print and RPC modes.
 - Ordinary operations covered by the grant do not prompt repeatedly. `sudo` and job cancellation always require a separate operation-specific confirmation.
 - Passwords are collected through masked input, excluded from tool arguments and session records, and cached only in process memory. OpenSSH receives a password through `SSH_ASKPASS`; remote `sudo` receives it through standard input.
 - Local upload and download paths must remain inside the current workspace. Remote paths are governed by the remote account and are not sandboxed by this extension.

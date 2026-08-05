@@ -159,11 +159,11 @@ navigation, copying with `c`, clearing with `x`, and closing with `q`, `Esc`, `E
 ### 🌐 Remote SSH work
 
 Remote SSH work starts with a single lightweight `ssh_enable` tool. After host/capability
-authorization for the current agent run, the model activates only the groups needed for the task:
-foreground execution, binary-safe upload/download, or detached jobs with status and cancellation.
+authorization, the model activates only the groups needed for the task: foreground execution,
+binary-safe upload/download, or detached jobs with status and cancellation.
 
-- One authorization covers ordinary operations in the selected groups; new groups, sudo, and job
-  cancellation still require explicit approval.
+- One authorization per host covers ordinary operations in the selected groups for the whole
+  session; new groups, sudo, and job cancellation still require explicit approval.
 - Connection timeout, retry count, and exponential backoff are configurable through `ssh_enable`.
 - 🔑 SSH and sudo passwords, when required, are read through masked TUI input and kept only in process
   memory; they are never model tool arguments.
@@ -240,9 +240,10 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
   tool results stay ephemeral and the exchange is not stored in the session.
 - The Markdown viewer, directory navigation, search, images, and Mermaid rendering are processed only
   inside the TUI extension and do not add content to the model context.
-- SSH exposes only the compact `ssh_enable` selector by default. Host/capability grants and capability
-  tools last for the current agent run, while job status and cancellation remain visible only for
-  tracked jobs. No extra classifier request is made.
+- SSH exposes only the compact `ssh_enable` selector by default. Host/capability grants are
+  session-scoped, so a later `ssh_enable` call on the same host re-exposes the tools without
+  prompting; job status and cancellation remain visible only for tracked jobs. `/ssh-tools off|reset`
+  revokes grants. No extra classifier request is made.
 - Sandbox adds no model request or persistent conversation content; it exposes compact read/write
   authorization tools alongside the sandboxed bash backend.
 

@@ -13,13 +13,13 @@ The SSH extension provides bounded remote execution without replacing Pi's local
 
 Only `ssh_enable` is visible initially. The model calls it with an SSH host and one or more capability groups:
 
-| Capability | Tools exposed for the current agent run |
+| Capability | Tools exposed for this session |
 | --- | --- |
 | `exec` | `ssh_exec` |
 | `files` | `ssh_upload`, `ssh_download` |
 | `jobs` | `ssh_job_start` |
 
-After a job starts, `ssh_job_status` and `ssh_job_cancel` remain visible while needed. Execution, file, and job-start tools are withdrawn when the agent settles. Capability grants expire at the same boundary, so a later agent run must authorize its required host/capability pairs again. Tool activation always starts from `pi.getActiveTools()` and changes only the SSH tool names, so unrelated user tool settings are preserved.
+After a job starts, `ssh_job_status` and `ssh_job_cancel` remain visible while needed. Execution, file, and job-start tools are withdrawn when the agent settles, but the underlying capability grants are **session-scoped**: they persist across agent turns until `/ssh-tools off` or `/ssh-tools reset` revokes them. A later `ssh_enable` call on the same host therefore re-exposes the tools without asking again. Tool activation always starts from `pi.getActiveTools()` and changes only the SSH tool names, so unrelated user tool settings are preserved.
 
 No keyword matcher or extra classifier request is used. The active model selects the capability enum from the `ssh_enable` schema.
 
@@ -33,7 +33,7 @@ Upload dist/app.tar.gz to deploy:/tmp/app.tar.gz.
 Start the integration test on build-host as a long job and monitor it.
 ```
 
-`ssh_enable` displays one interactive authorization containing the host, newly requested capability groups, connection timeout, and retry count. The grant covers ordinary operations in those groups for the current agent run, avoiding a confirmation for every command or transfer. Adding another capability or starting a later agent run requires another grant. `sudo` execution and job cancellation always retain their own operation-specific confirmation. Remote actions are unavailable in print/RPC mode because those modes cannot provide interactive approval.
+`ssh_enable` displays one interactive authorization containing the host, newly requested capability groups, connection timeout, and retry count. The grant covers ordinary operations in those groups for the whole session, avoiding a confirmation for every command or transfer — a later agent turn re-uses it without prompting. Adding another capability for the same host prompts only for the missing ones; `/ssh-tools off` and `/ssh-tools reset` revoke grants. `sudo` execution and job cancellation always retain their own operation-specific confirmation. Remote actions are unavailable in print/RPC mode because those modes cannot provide interactive approval.
 
 Detached jobs additionally ask once per host per session whether the job may start a login shell that reads the remote user's profile files (`~/.profile`, `~/.bash_profile`, `~/.zprofile`, ...) to inherit the login environment. Declining still starts the job, but in a plain shell that does not read the profile, so job output carries no profile side effects or warnings. The answer persists for the session — it is not re-asked on later agent turns or job starts on the same host — and is cleared by `/ssh-tools reset`.
 

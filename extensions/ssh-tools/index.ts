@@ -642,7 +642,10 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
   pi.on("session_start", () => activation.sync(isPlanModeActive()));
   pi.on("before_agent_start", () => activation.sync(isPlanModeActive()));
   pi.on("agent_settled", () => {
-    session.clearTurnAuthorization();
+    // Capability grants are session-scoped: `ssh_enable` asks once per host and
+    // the grant survives agent turns until /ssh-tools off|reset revokes it.
+    // Only the tool visibility settles, so a later ssh_enable call on the same
+    // host re-exposes the tools without prompting.
     activation.settle();
     activation.sync(isPlanModeActive());
   });
