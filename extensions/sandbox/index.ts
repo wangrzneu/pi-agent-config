@@ -1,4 +1,5 @@
 import { rm } from "node:fs/promises";
+import { join } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import {
   CONFIG_DIR_NAME,
@@ -38,13 +39,33 @@ export default function sandboxExtension(pi: ExtensionAPI): void {
   registerSandboxExtension(pi, SandboxManager);
 }
 
+export interface AuthorizationOptions {
+  allowOsTemp?: boolean;
+  piReadRoots?: string[];
+}
+
+function defaultPiReadRoots(): string[] {
+  const agentDir = getAgentDir();
+  return [
+    "skills",
+    "prompts",
+    "themes",
+    "extensions",
+    "git",
+    "packages",
+  ].map((name) => join(agentDir, name));
+}
+
 export function registerSandboxExtension(
   pi: ExtensionAPI,
   runtime: SandboxRuntime,
+  authorizationOptions: AuthorizationOptions = {},
 ): void {
   const tracker = new SandboxProcessTracker();
-  const readAuthorization = new SandboxPathAuthorization();
-  const writeAuthorization = new SandboxPathAuthorization();
+  const piReadRoots = authorizationOptions.piReadRoots ?? defaultPiReadRoots();
+  const authOptions = { ...authorizationOptions, piReadRoots };
+  const readAuthorization = new SandboxPathAuthorization(authOptions);
+  const writeAuthorization = new SandboxPathAuthorization(authOptions);
   const baseBash = createBashToolDefinition(process.cwd());
   let initialized = false;
   let state: SandboxState = { mode: "starting", reason: "waiting for session start" };

@@ -13,7 +13,7 @@ test("workspace reads are allowed and external reads require a grant", async () 
   await mkdir(external);
   await writeFile(join(workspace, "inside.txt"), "inside");
   await writeFile(join(external, "outside.txt"), "outside");
-  const authorization = new SandboxPathAuthorization();
+  const authorization = new SandboxPathAuthorization({ allowOsTemp: false });
   await authorization.reset(workspace);
 
   assert.equal(await authorization.isAllowed("inside.txt", workspace), true);
@@ -32,7 +32,7 @@ test("workspace symlinks cannot bypass external read authorization", async () =>
   await mkdir(workspace);
   await writeFile(external, "outside");
   await symlink(external, join(workspace, "link.txt"));
-  const authorization = new SandboxPathAuthorization();
+  const authorization = new SandboxPathAuthorization({ allowOsTemp: false });
   await authorization.reset(workspace);
 
   assert.equal(await authorization.isAllowed("link.txt", workspace), false);
@@ -45,7 +45,7 @@ test("a missing child below an external symlink remains outside the workspace", 
   await mkdir(workspace);
   await mkdir(external);
   await symlink(external, join(workspace, "external-dir"));
-  const authorization = new SandboxPathAuthorization();
+  const authorization = new SandboxPathAuthorization({ allowOsTemp: false });
   await authorization.reset(workspace);
 
   assert.equal(
@@ -61,7 +61,7 @@ test("write authorization can grant one not-yet-created external file", async ()
   await mkdir(workspace);
   await mkdir(external);
   const target = join(external, "new-file.txt");
-  const authorization = new SandboxPathAuthorization();
+  const authorization = new SandboxPathAuthorization({ allowOsTemp: false });
   await authorization.reset(workspace);
 
   const grant = await authorization.inspect(target, workspace, { allowMissing: true });
@@ -71,13 +71,47 @@ test("write authorization can grant one not-yet-created external file", async ()
   assert.equal(await authorization.isAllowed(join(external, "other.txt"), workspace), false);
 });
 
+test("OS temp files are readable from another workspace by default", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "pi-read-workspace-"));
+  const tempFile = join(tmpdir(), `pi-read-os-temp-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`);
+  await writeFile(tempFile, "transient");
+  const authorization = new SandboxPathAuthorization(); // allowOsTemp defaults true
+  await authorization.reset(workspace);
+
+  assert.equal(await authorization.isAllowed(tempFile, workspace), true);
+  // …but with the option disabled, only workspace + grants remain allowed.
+  const strict = new SandboxPathAuthorization({ allowOsTemp: false });
+  await strict.reset(workspace);
+  assert.equal(await strict.isAllowed(tempFile, workspace), false);
+});
+
+test("Pi managed resource roots are readable without a grant", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "pi-read-workspace-"));
+  const root = await mkdtemp(join(tmpdir(), "pi-agent-dir-like-"));
+  const skillsRoot = join(root, "skills");
+  const sensitive = join(root, "settings.json");
+  await mkdir(skillsRoot);
+  await writeFile(join(skillsRoot, "SKILL.md"), "guidance");
+  await writeFile(sensitive, "secret");
+
+  const authorization = new SandboxPathAuthorization({
+    allowOsTemp: false,
+    piReadRoots: [skillsRoot],
+  });
+  await authorization.reset(workspace);
+
+  assert.equal(await authorization.isAllowed(join(skillsRoot, "SKILL.md"), workspace), true);
+  // The agent dir root itself (settings.json) is not inside a managed root.
+  assert.equal(await authorization.isAllowed(sensitive, workspace), false);
+});
+
 test("read grants are cleared when authorization resets", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-read-reset-"));
   const first = join(root, "first");
   const second = join(root, "second");
   await mkdir(first);
   await mkdir(second);
-  const authorization = new SandboxPathAuthorization();
+  const authorization = new SandboxPathAuthorization({ allowOsTemp: false });
   await authorization.reset(first);
   authorization.grant(await authorization.inspect(second, first));
 

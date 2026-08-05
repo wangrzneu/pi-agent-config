@@ -46,6 +46,10 @@ Run `/sandbox` to list active grants. Use `/sandbox revoke-read` or `/sandbox re
 - are cleared by reload, session replacement, or shutdown;
 - fail closed when no interactive approval channel is available.
 
+Files under the OS temporary directory (`/tmp`, `/private/tmp`, the per-user `TMPDIR`) are readable by default, matching the sandbox filesystem allowlist already granted to shell commands. Transient scratch such as a review checkout under `/tmp/...` can be inspected without a grant; only write access and non-temporary home/project paths need approval.
+
+Pi's own managed resources are readable by default: the agent directory's `skills`, `prompts`, `themes`, `extensions`, and installed packages (`git/`, `packages/`). These are runtime guidance and code, not user credentials. The agent-directory root itself (for example `settings.json`) is not in that default set.
+
 The extension does not parse arbitrary shell syntax and prompt retroactively. A shell command that needs an unapproved external path fails with an OS permission error; authorize the path first and then run the command. Configured `denyWrite` patterns still take precedence over a session write grant.
 
 ## Configuration

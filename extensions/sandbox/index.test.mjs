@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { registerSandboxExtension } from "./index.ts";
 
-function createHarness(runtime, flags = {}) {
+function createHarness(runtime, flags = {}, authorizationOptions) {
   const handlers = new Map();
   const commands = new Map();
   let bashTool;
@@ -65,7 +65,11 @@ function createHarness(runtime, flags = {}) {
     },
   };
 
-  registerSandboxExtension(pi, runtime);
+  registerSandboxExtension(
+    pi,
+    runtime,
+    authorizationOptions ?? { allowOsTemp: false },
+  );
   return {
     handlers,
     commands,
@@ -125,6 +129,42 @@ test("initialized sandbox executes bash with Pi session environment", async () =
 
   await harness.handlers.get("session_shutdown")({}, harness.ctx);
   assert.equal(fake.resetCount(), 1);
+});
+
+test("OS temp paths are readable from outside the workspace by default", async () => {
+  const externalRoot = await mkdtemp(join(tmpdir(), "pi-sandbox-ostemp-"));
+  const externalFile = join(externalRoot, "outside.txt");
+  await writeFile(externalFile, "transient");
+  const fake = createRuntime();
+  // Production default: allowOsTemp stays true — no override passed here.
+  const harness = createHarness(fake.runtime, {}, {});
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  const gate = await harness.handlers.get("tool_call")({
+    toolName: "read",
+    input: { path: externalFile },
+  }, harness.ctx);
+  assert.equal(gate, undefined, "OS temp read should pass the gate by default");
+});
+
+test("Pi managed skill files are readable without a grant", async () => {
+  const piRoot = await mkdtemp(join(tmpdir(), "pi-agent-resources-"));
+  const skillsDir = join(piRoot, "git", "github.com", "demo", "skills", "pi-workflow");
+  await mkdir(skillsDir, { recursive: true });
+  const skillFile = join(skillsDir, "SKILL.md");
+  await writeFile(skillFile, "guidance");
+  const fake = createRuntime();
+  const harness = createHarness(fake.runtime, {}, {
+    allowOsTemp: false,
+    piReadRoots: [join(piRoot, "git")],
+  });
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  const gate = await harness.handlers.get("tool_call")({
+    toolName: "read",
+    input: { path: skillFile },
+  }, harness.ctx);
+  assert.equal(gate, undefined, "Pi skill file read should pass the gate");
 });
 
 test("external reads are blocked until the user grants the path", async () => {
