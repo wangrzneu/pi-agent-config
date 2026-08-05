@@ -19,7 +19,25 @@ export interface JobStatus {
   stderrBytes: number;
 }
 
-export function buildStartJobScript(jobId: string, cwd: string, command: string): string {
+export interface StartJobOptions {
+  /**
+   * Run the command through a login shell (`sh -lc`), which reads the remote
+   * user's profile files (`~/.profile`, `~/.bash_profile`, `~/.zprofile`)
+   * so the job inherits the login environment. Defaults to true.
+   *
+   * Set to false to run through a plain shell (`sh -c`) that does not read
+   * profile files. Use this when reading the profile was not authorized.
+   */
+  login?: boolean;
+}
+
+export function buildStartJobScript(
+  jobId: string,
+  cwd: string,
+  command: string,
+  options: StartJobOptions = {},
+): string {
+  const shellFlags = options.login === false ? "-c" : "-lc";
   const encodedCommand = Buffer.from(command, "utf8").toString("base64");
   return `set -eu
 umask 077
@@ -70,10 +88,10 @@ if ! cd "$cwd"; then
 fi
 command_text=$(cat "$job_dir/command")
 if command -v setsid >/dev/null 2>&1; then
-  setsid sh -lc "$command_text" > "$job_dir/stdout" 2> "$job_dir/stderr" < /dev/null &
+  setsid sh ${shellFlags} "$command_text" > "$job_dir/stdout" 2> "$job_dir/stderr" < /dev/null &
   printf '%s\n' 1 > "$job_dir/grouped"
 else
-  sh -lc "$command_text" > "$job_dir/stdout" 2> "$job_dir/stderr" < /dev/null &
+  sh ${shellFlags} "$command_text" > "$job_dir/stdout" 2> "$job_dir/stderr" < /dev/null &
   printf '%s\n' 0 > "$job_dir/grouped"
 fi
 child=$!

@@ -35,6 +35,8 @@ Start the integration test on build-host as a long job and monitor it.
 
 `ssh_enable` displays one interactive authorization containing the host, newly requested capability groups, connection timeout, and retry count. The grant covers ordinary operations in those groups for the current agent run, avoiding a confirmation for every command or transfer. Adding another capability or starting a later agent run requires another grant. `sudo` execution and job cancellation always retain their own operation-specific confirmation. Remote actions are unavailable in print/RPC mode because those modes cannot provide interactive approval.
 
+Detached jobs additionally ask once per host per agent run whether the job may start a login shell that reads the remote user's profile files (`~/.profile`, `~/.bash_profile`, `~/.zprofile`, ...) to inherit the login environment. Declining still starts the job, but in a plain shell that does not read the profile, so job output carries no profile side effects or warnings.
+
 Use `/ssh-tools` to inspect authorized hosts and tracked jobs:
 
 ```text

@@ -89,8 +89,18 @@ interface SshRunOptions extends ProcessOptions {
 class SshSession {
   readonly authorization = new SshAuthorization();
   readonly jobs = new Map<string, JobRecord>();
+  /** Hosts whose detached jobs may read the remote login profile in this agent run. */
+  private readonly loginEnvironmentGranted = new Set<string>();
   private readonly sshPasswords = new Map<string, string>();
   private readonly sudoPasswords = new Map<string, string>();
+
+  isLoginEnvironmentAuthorized(host: string): boolean {
+    return this.loginEnvironmentGranted.has(host);
+  }
+
+  authorizeLoginEnvironment(host: string): void {
+    this.loginEnvironmentGranted.add(host);
+  }
 
   async authorize(
     host: string,
@@ -236,6 +246,7 @@ class SshSession {
 
   clearTurnAuthorization(): void {
     this.authorization.clearTurnGrants();
+    this.loginEnvironmentGranted.clear();
   }
 
   resetAuthorization(): void {
@@ -430,8 +441,22 @@ export default function sshToolsExtension(pi: ExtensionAPI): void {
           `${params.host} · ${params.cwd}\n\n${preview(params.command)}`,
         );
       }
+      // A login shell reads the remote user's home profile (~/.profile and
+      // friends), which may produce side effects or warnings in job output.
+      // Ask once per host per agent run; declining runs the job in a plain
+      // shell without the login environment.
+      let login = true;
+      if (!session.isLoginEnvironmentAuthorized(params.host)) {
+        const approved = await getApproval(
+          ctx,
+          "Read remote login environment for job",
+          `The detached job will start a login shell that reads the profile files of the target user on ${params.host} (~/.profile, ~/.bash_profile, ~/.zprofile, ...) so it inherits the login environment.\n\nDeclining starts the job in a plain shell without reading the profile.\n\n${params.host} · ${params.cwd}\n\n${preview(params.command)}`,
+        );
+        if (approved) session.authorizeLoginEnvironment(params.host);
+        else login = false;
+      }
       const id = randomUUID();
-      const script = buildStartJobScript(id, params.cwd, params.command);
+      const script = buildStartJobScript(id, params.cwd, params.command, { login });
       const result = await session.runRemote(
         params.host,
         "sh -s",
@@ -655,10 +680,26 @@ async function requireApproval(
   title: string,
   message: string,
 ): Promise<void> {
+  if (!(await getApproval(ctx, title, message))) {
+    throw new Error("Remote SSH action was not approved.");
+  }
+}
+
+/**
+ * Ask for approval and return whether it was granted, without throwing on a
+ * decline. Callers that have a safe fallback (for example running a job in a
+ * plain shell instead of a login shell) can use this instead of
+ * `requireApproval`.
+ */
+async function getApproval(
+  ctx: ExtensionContext,
+  title: string,
+  message: string,
+): Promise<boolean> {
   if (!ctx.hasUI || ctx.mode !== "tui") {
     throw new Error("Remote SSH actions require interactive approval in TUI mode.");
   }
-  if (!(await ctx.ui.confirm(title, message))) throw new Error("Remote SSH action was not approved.");
+  return ctx.ui.confirm(title, message);
 }
 
 function sudoNonInteractiveCommand(command: string): string {

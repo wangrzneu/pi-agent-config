@@ -26,8 +26,11 @@ const wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mill
 test("detached job starts, reports output, and exits", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-ssh-jobs-"));
   try {
+    // login:false represents a job started without login-environment
+    // authorization: a plain shell that does not read ~/.profile, so job
+    // stderr stays limited to the command's own output.
     const start = runScript(
-      buildStartJobScript("job-complete", root, "printf 'hello'; printf 'warn' >&2"),
+      buildStartJobScript("job-complete", root, "printf 'hello'; printf 'warn' >&2", { login: false }),
       root,
     );
     assert.equal(start.status, 0, start.stderr);
@@ -54,7 +57,7 @@ test("detached job starts, reports output, and exits", async () => {
 test("detached job can be cancelled", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-ssh-jobs-"));
   try {
-    const start = runScript(buildStartJobScript("job-cancel", root, "sleep 30"), root);
+    const start = runScript(buildStartJobScript("job-cancel", root, "sleep 30", { login: false }), root);
     assert.equal(start.status, 0, start.stderr);
     const job = parseStartedJob(start.stdout);
 
@@ -78,6 +81,7 @@ test("repeating the same start request reuses the remote job", async () => {
       "job-retry",
       root,
       "printf x >> count; sleep 0.5",
+      { login: false },
     );
     const first = runScript(script, root);
     const second = runScript(script, root);
@@ -90,4 +94,15 @@ test("repeating the same start request reuses the remote job", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("authorized jobs use a login shell; unauthorized jobs use a plain shell", () => {
+  const authorized = buildStartJobScript("job-login", "/tmp", "echo hi");
+  const unauthorized = buildStartJobScript("job-plain", "/tmp", "echo hi", { login: false });
+  // Login shell reads ~/.profile and friends so the job inherits the environment.
+  assert.match(authorized, /sh -lc "\$command_text"/);
+  // Plain shell does not read profile files, keeping job output side-effect free.
+  assert.doesNotMatch(authorized, /sh -c "\$command_text"/);
+  assert.match(unauthorized, /sh -c "\$command_text"/);
+  assert.doesNotMatch(unauthorized, /sh -lc/);
 });
