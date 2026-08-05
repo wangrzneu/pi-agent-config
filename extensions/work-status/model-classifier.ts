@@ -2,7 +2,14 @@ import { createHash } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { summarizeWork, type WorkType } from "./work-status.ts";
 
-const CLASSIFIER_TIMEOUT_MS = 2_000;
+// Classification runs as a short side request that must not delay the agent
+// turn (before_agent_start handlers are not awaited before agent_start), but
+// it must survive first-request latency: some providers/models (e.g. Fireworks
+// reasoning models via anthropic-messages) take 2.5–7.5s to produce the short
+// JSON answer. 2s aborts almost every request and silently disables the
+// work-status footer. 10s keeps the request bounded while allowing slow
+// first responses to complete.
+const CLASSIFIER_TIMEOUT_MS = 10_000;
 const MAX_PROMPT_CHARACTERS = 6_000;
 const VALID_WORK_TYPES = new Set<WorkType>([
   "design",

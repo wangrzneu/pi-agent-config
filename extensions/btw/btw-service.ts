@@ -1,6 +1,15 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
-const BTW_TIMEOUT_MS = 30_000;
+// Each model round (request plus its tool executions) gets its own fresh
+// timeout. One global deadline (originally 30s) made any multi-round exchange
+// abort with "Side question cancelled.": the first round of a cold Fireworks
+// anthropic-messages request alone measured 20–24s (with occasional spikes
+// beyond 30s), leaving no budget for the follow-up rounds that produce the
+// final answer. With per-round budgets, a slow cold start no longer eats the
+// whole exchange; warm rounds measure ~2s, so a typical answer finishes in
+// ~25–45s. The overall cap keeps the exchange bounded no matter what.
+const BTW_ROUND_TIMEOUT_MS = 45_000;
+const BTW_TOTAL_TIMEOUT_MS = 120_000;
 const BTW_MAX_TOKENS = 1_024;
 const BTW_MAX_TOOL_ROUNDS = 4;
 const BTW_MAX_TOOL_CALLS = 12;
@@ -82,10 +91,8 @@ export async function askBtw(
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
   if (!auth.ok) throw new BtwError(auth.error);
 
-  const timeoutSignal = AbortSignal.timeout(BTW_TIMEOUT_MS);
-  const requestSignal = signal
-    ? AbortSignal.any([signal, timeoutSignal])
-    : timeoutSignal;
+  const userSignal = signal;
+  const overallSignal = AbortSignal.timeout(BTW_TOTAL_TIMEOUT_MS);
   const messages = await buildMessages(ctx);
   const tools = await loadTools(ctx);
   messages.push({
@@ -94,13 +101,16 @@ export async function askBtw(
     timestamp: Date.now(),
   });
 
-  const options = {
+  // `reasoning` inherits the current thinking level (same as the main session)
+  // when enabled, but the exchange never mutates the session's level. Side
+  // questions are short-lived; the read-only tools give the model enough
+  // context to answer directly. `signal`/`timeoutMs` are per-round and set
+  // inside the loop; this is the shared base for every round.
+  const baseOptions = {
     apiKey: auth.apiKey,
     headers: auth.headers,
     env: auth.env,
-    signal: requestSignal,
     maxTokens: Math.min(BTW_MAX_TOKENS, model.maxTokens),
-    timeoutMs: BTW_TIMEOUT_MS,
     maxRetries: 0,
     cacheRetention: "short",
     sessionId: ctx.sessionManager.getSessionId(),
@@ -110,22 +120,42 @@ export async function askBtw(
   };
   let toolCallCount = 0;
 
+  let activeSignal: AbortSignal | undefined;
+
+  // One model round: request (optionally with read-only tools) plus the tools'
+  // executions, all bounded by one fresh round timeout.
+  const runRound = async (provideTools: boolean): Promise<{
+    response: CompletionResponse;
+    roundTimeout: AbortSignal;
+    roundSignal: AbortSignal;
+  }> => {
+    const roundTimeout = AbortSignal.timeout(BTW_ROUND_TIMEOUT_MS);
+    const roundSignal = userSignal
+      ? AbortSignal.any([userSignal, overallSignal, roundTimeout])
+      : AbortSignal.any([overallSignal, roundTimeout]);
+    activeSignal = roundSignal;
+    const response = await completeModel(
+      model,
+      {
+        systemPrompt: `${ctx.getSystemPrompt()}\n\n${BTW_SYSTEM_SUFFIX}`,
+        messages,
+        ...(provideTools && tools.length > 0 ? { tools } : {}),
+      },
+      {
+        ...baseOptions,
+        signal: roundSignal,
+        timeoutMs: BTW_ROUND_TIMEOUT_MS,
+      },
+    );
+    return { response, roundTimeout, roundSignal };
+  };
+
   try {
-    for (let round = 0; round <= BTW_MAX_TOOL_ROUNDS; round += 1) {
-      const response = await completeModel(
-        model,
-        {
-          systemPrompt: `${ctx.getSystemPrompt()}\n\n${BTW_SYSTEM_SUFFIX}`,
-          messages,
-          ...(round < BTW_MAX_TOOL_ROUNDS && tools.length > 0
-            ? { tools }
-            : {}),
-        },
-        options,
-      );
+    for (let round = 0; round < BTW_MAX_TOOL_ROUNDS; round += 1) {
+      const { response, roundTimeout, roundSignal } = await runRound(true);
 
       if (response.stopReason === "aborted") {
-        throw new BtwError("Side question cancelled.");
+        throw new BtwError(abortMessage(userSignal, overallSignal, roundTimeout));
       }
       if (response.stopReason === "error") {
         throw new BtwError(response.errorMessage || "Side question failed.");
@@ -144,7 +174,7 @@ export async function askBtw(
       for (const toolCall of toolCalls) {
         toolCallCount += 1;
         const tool = tools.find((candidate) => candidate.name === toolCall.name);
-        if (round >= BTW_MAX_TOOL_ROUNDS || toolCallCount > BTW_MAX_TOOL_CALLS) {
+        if (toolCallCount > BTW_MAX_TOOL_CALLS) {
           messages.push(toolError(
             toolCall,
             "The read-only tool budget is exhausted. Answer with the information already available.",
@@ -160,7 +190,7 @@ export async function askBtw(
           const result = await tool.execute(
             toolCall.id,
             toolCall.arguments,
-            requestSignal,
+            roundSignal,
           );
           messages.push({
             role: "toolResult",
@@ -172,8 +202,8 @@ export async function askBtw(
             timestamp: Date.now(),
           });
         } catch (error) {
-          if (requestSignal.aborted) {
-            throw new BtwError("Side question cancelled or timed out.");
+          if (roundSignal.aborted) {
+            throw new BtwError(abortMessage(userSignal, overallSignal, roundTimeout));
           }
           messages.push(toolError(
             toolCall,
@@ -182,15 +212,49 @@ export async function askBtw(
         }
       }
     }
+
+    // All tool rounds are used up. Run one final round without tools so the
+    // model answers from what it already gathered (the budget-exhausted tool
+    // results above already told it to); without this, an exchange that burned
+    // its tool budget used to die with "read-only tool limit" even though the
+    // model had enough material to answer.
+    const { response: finalResponse, roundTimeout: finalRoundTimeout } =
+      await runRound(false);
+    if (finalResponse.stopReason === "aborted") {
+      throw new BtwError(abortMessage(userSignal, overallSignal, finalRoundTimeout));
+    }
+    if (finalResponse.stopReason === "error") {
+      throw new BtwError(
+        finalResponse.errorMessage || "Side question failed.",
+      );
+    }
+    const answer = extractAnswer(finalResponse);
+    if (!answer) {
+      throw new BtwError("The model did not answer within the read-only tool limit.");
+    }
+    return answer;
   } catch (error) {
     if (error instanceof BtwError) throw error;
-    if (requestSignal.aborted) {
-      throw new BtwError("Side question cancelled or timed out.");
+    if (userSignal?.aborted) {
+      throw new BtwError("Side question cancelled.");
+    }
+    if (overallSignal.aborted || activeSignal?.aborted) {
+      throw new BtwError("Side question timed out.");
     }
     throw new BtwError(error instanceof Error ? error.message : "Side question failed.");
   }
+}
 
-  throw new BtwError("The model did not answer within the read-only tool limit.");
+function abortMessage(
+  userSignal: AbortSignal | undefined,
+  overallSignal: AbortSignal,
+  roundTimeout: AbortSignal,
+): string {
+  if (userSignal?.aborted) return "Side question cancelled.";
+  if (overallSignal.aborted || roundTimeout.aborted) {
+    return "Side question timed out.";
+  }
+  return "Side question cancelled.";
 }
 
 function extractAnswer(response: CompletionResponse): string {
