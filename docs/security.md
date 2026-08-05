@@ -11,6 +11,17 @@ Plan mode is a guardrail, not a security sandbox. Run untrusted code in a contai
 
 The allowlist should stay narrow. New commands or flags require tests showing both intended reads and rejected mutations.
 
+## Local command sandbox
+
+- Local `bash` and user `!` commands are routed through `@anthropic-ai/sandbox-runtime` on supported hosts. Initialization fails closed; an unavailable enabled sandbox blocks shell execution.
+- The default policy allows workspace reads/writes, the per-user OS temporary directory, the private sandbox root, common package registries, and local binding. Shell startup additionally allows runtime-required system/toolchain reads. Common API-token environment variables are removed from child processes. On macOS the sandbox also reaches the system trustd service so pip/Go/gh-style TLS verification works.
+- Python work should use the workspace `.venv` (a `pi-workflow` skill guideline, not a sandbox restriction) so package management and script runs avoid the host interpreter's home-directory paths. The sandbox does not force this; a system-interpreter `pip` that reads home paths can fail inside the sandbox.
+- External user files require explicit approval through `sandbox_authorize_read`/`sandbox_authorize_write` or `/sandbox allow-read|allow-write`. Canonical-path checks also gate direct read/search/list/write/edit calls and prevent workspace symlink escapes. Grants are memory-only and session-scoped.
+- Long foreground commands have no implicit timeout. Cancellation targets the process group and escalates from `TERM` to `KILL`; persistent daemonized descendants are not guaranteed to remain tracked.
+- Package and extension code execute outside this boundary. The authorized workspace remains writable and can still be damaged.
+- Project sandbox configuration is read only for trusted projects. Configuration can intentionally weaken or disable the policy, so review `.pi/sandbox.json` as code.
+- Use a container, VM, or dedicated low-privilege account when the sandbox-runtime boundary is insufficient. See [`sandbox.md`](sandbox.md).
+
 ## Secrets
 
 - Do not print credentials, environment files, tokens, or private keys.

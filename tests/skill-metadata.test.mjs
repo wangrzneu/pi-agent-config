@@ -15,6 +15,15 @@ function findSkillFiles(directory) {
   });
 }
 
+test("pi-workflow skill carries the Python venv working constraint", () => {
+  const skillPath = join(skillsRoot, "pi-workflow", "SKILL.md");
+  const content = readFileSync(skillPath, "utf8");
+
+  assert.match(content, /python3 -m venv \.venv/);
+  assert.match(content, /source \.venv\/bin\/activate/);
+  assert.match(content, /home-directory reads/);
+});
+
 test("every SKILL.md has required name and description frontmatter", () => {
   const skillFiles = findSkillFiles(skillsRoot);
   assert.ok(skillFiles.length > 0, "expected at least one SKILL.md");

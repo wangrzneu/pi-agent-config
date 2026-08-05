@@ -11,6 +11,7 @@ A personally maintained collection of configurations, extensions, and workflows 
 - `extensions/work-status/`: show the current task and work type in the Pi TUI
 - `extensions/btw/`: ask temporary side questions without changing the main conversation
 - `extensions/ssh-tools/`: dynamically discovered SSH execution, transfer, and remote job tools
+- `extensions/sandbox/`: fail-closed OS sandboxing for local shell commands
 - `extensions/external-memory/`: opt-in synced-folder memory captured at compaction with two-stage recall
 
 External memory capture is opt-in per project: set `PI_AGENT_MEMORY_ROOT` to an absolute path, then run
@@ -60,7 +61,7 @@ You can also merge the contents of `settings.example.json` into the project's `.
 
 ### Local directory
 
-When developing or using a local checkout, install the Mermaid rendering dependency first:
+When developing or using a local checkout, install the package dependencies first:
 
 ```bash
 cd /absolute/path/to/pi-agent-config
@@ -82,6 +83,19 @@ pi
 ```
 
 After Pi starts, use `/plan` to toggle planning mode.
+
+Local `bash` and user `!` commands run inside a fail-closed OS sandbox on macOS and Linux. The
+coding-oriented defaults allow workspace reads/writes, package registries, local test servers, and the
+per-user OS temporary directory for toolchains (git, compilers). Python work is expected to use the
+workspace `.venv` (a `pi-workflow` guideline): create with `python3 -m venv .venv` and activate with
+`source .venv/bin/activate` in the same command as the `python`/`pip` use, so pip and scripts avoid
+home-directory dependencies — see "Python environments" in
+[`docs/sandbox.md`](docs/sandbox.md). External user files require explicit session approval through
+`sandbox_authorize_read`/`sandbox_authorize_write` or `/sandbox allow-read|allow-write <path>`; the same
+gates cover Pi's direct read/search/list/write/edit tools. Foreground commands have no implicit timeout
+and support streamed output plus process-group cancellation for long builds and tests. Use `/sandbox` to
+inspect the effective policy, `/sandbox reload` after configuration changes, or `--no-sandbox` for an
+explicit bypass.
 
 Use `/btw <question>` for a temporary, context-aware side question. It uses the current model and
 conversation, with isolated read-only `read`, `grep`, `find`, and `ls` tools when file inspection is
@@ -159,6 +173,7 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
 - Each `/btw` question uses a separate model loop with a small output and tool-call budget. Read-only tool results stay ephemeral and the exchange is not stored in the session.
 - The Markdown viewer, directory navigation, search, images, and Mermaid rendering are processed only inside the TUI extension and do not add content to the model context.
 - SSH exposes only the compact `ssh_enable` selector by default. Host/capability grants and capability tools last for the current agent run, while job status and cancellation remain visible only for tracked jobs. No extra classifier request is made.
+- Sandbox adds no model request or persistent conversation content; it exposes compact read/write authorization tools alongside the sandboxed bash backend.
 
 ## Design Principles
 
@@ -169,7 +184,7 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
 
 ## Security
 
-Plan mode is a safeguard against accidental changes, not a security sandbox. Pi packages and
-extensions can execute arbitrary code. Review the source before installation, and use a container
-or a dedicated low-privilege user when working with real credentials, production code, or
-untrusted projects. See [`docs/security.md`](docs/security.md) for details.
+The local command sandbox limits shell children but does not sandbox Pi's direct file tools, packages,
+or extensions. Plan mode remains only a safeguard against accidental changes. Review package source,
+and use a container, VM, or dedicated low-privilege user for real credentials, production code, or
+hostile projects. See [`docs/security.md`](docs/security.md) for details.

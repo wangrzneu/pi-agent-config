@@ -11,6 +11,7 @@
 - `extensions/work-status/`：在 Pi TUI 中显示当前任务和工作类型
 - `extensions/btw/`：临时提问，不改变主会话
 - `extensions/ssh-tools/`：按需发现的 SSH 执行、文件传输和远程作业工具
+- `extensions/sandbox/`：对本地 shell 命令实施 fail-closed 的操作系统级沙箱
 - `skills/pi-workflow/`：精简的默认工作规范
 - `prompts/`：按需使用的 review、debugging 和 architecture 提示词
 - `docs/`：代码探索、外部项目和安全边界参考文档
@@ -55,7 +56,7 @@ pi install -l git:github.com/wangrzneu/pi-agent-config
 
 ### 本地目录
 
-开发或使用本地检出版本时，先安装 Mermaid 渲染依赖：
+开发或使用本地检出版本时，先安装 package 依赖：
 
 ```bash
 cd /absolute/path/to/pi-agent-config
@@ -77,6 +78,17 @@ pi
 ```
 
 启动后使用 `/plan` 切换规划模式。
+
+在 macOS 和 Linux 上，本地 `bash` 与用户 `!` 命令会进入 fail-closed 的操作系统级沙箱。
+默认只允许读写工作区，同时允许访问常见包仓库、启动本地测试服务，并为 git/编译器提供操作系统临时目录。
+Python 操作应使用工作区的 `.venv`（`pi-workflow` skill 工作约束）：先 `python3 -m venv .venv` 创建，
+再在用到 `python`/`pip` 的同一条命令里 `source .venv/bin/activate`（每次 bash 调用都是新 shell），
+让 pip 与脚本避开 home 目录依赖；详见 [`docs/sandbox.md`](docs/sandbox.md) 的 “Python environments”。
+访问工作区外的用户文件必须通过 `sandbox_authorize_read`、`sandbox_authorize_write` 或
+`/sandbox allow-read|allow-write <路径>` 获得当前 session 的明确授权；Pi 的直接读取、搜索、目录、写入和编辑工具
+也使用相同权限门。前台命令没有隐式超时，并支持流式输出和进程组取消，适合耗时较长的构建与测试。
+使用 `/sandbox` 查看生效策略，修改配置后执行 `/sandbox reload`；只有明确传入 `--no-sandbox` 才会绕过沙箱。
+要求、配置与安全边界见 [`docs/sandbox.md`](docs/sandbox.md)。
 
 使用 `/btw <问题>` 发起一次能看到当前会话上下文的临时提问。它使用当前模型，并可通过隔离的
 只读 `read`、`grep`、`find` 和 `ls` 工具查看或搜索文件。问题、回答和工具结果都不会写入主会话。
@@ -147,6 +159,7 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
 - 每个 `/btw` 问题会运行一个带有较小输出与工具调用预算的独立模型循环；只读工具结果是临时的，问答不会写入会话。
 - Markdown 阅读器、目录、搜索、图片和 Mermaid 都只在 TUI 扩展进程中处理，不会把内容加入模型上下文。
 - SSH 默认只暴露精简的 `ssh_enable` 选择器；主机/能力授权和能力工具仅在当前 Agent 运行中有效，作业状态和取消工具只为已跟踪作业保留。该过程不发起额外模型分类请求。
+- Sandbox 不会增加模型请求，也不会向会话写入持久内容；除沙箱化 bash 外，只暴露精简的读写授权工具。
 
 ## 设计原则
 
@@ -157,4 +170,6 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
 
 ## 安全提醒
 
-Plan mode 是防误操作机制，不是安全沙箱。Pi package 和扩展可以执行任意代码；安装前请审查源码，处理真实凭据、生产代码或不可信项目时应使用容器或专用低权限用户。详见 [`docs/security.md`](docs/security.md)。
+本地命令沙箱只约束 shell 子进程，不会隔离 Pi 的直接文件工具、package 或扩展；Plan mode 也仍然只是防误操作机制。
+安装前请审查源码，处理真实凭据、生产代码或恶意项目时应使用容器、虚拟机或专用低权限用户。
+详见 [`docs/security.md`](docs/security.md)。
