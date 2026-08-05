@@ -113,7 +113,7 @@ export function codingCacheEnvironment(
 ): NodeJS.ProcessEnv {
   return {
     ...env,
-    ...gitIdentityEnv(gitIdentity),
+    ...gitIdentityEnv(gitIdentity, env),
     TMPDIR: join(SANDBOX_TEMP_ROOT, "tmp"),
     TMP: join(SANDBOX_TEMP_ROOT, "tmp"),
     TEMP: join(SANDBOX_TEMP_ROOT, "tmp"),
