@@ -182,6 +182,14 @@ classification request with extended thinking disabled, while the working messag
 tool detail. Invalid, failed, or timed-out classifications are omitted without a fallback status.
 Classification results are not added to the session or main model context.
 
+### 🔁 Loop guard
+
+Enabled by default. While an agent run is active, the loop guard tracks tool calls and detects stuck
+loops: the same call repeated in a row (5+, configurable), an identical 2/3-step call cycle, or a run
+that exceeds 120 tool calls. On detection it asks whether to abort the run (and aborts directly in
+print/RPC mode). Use `/loop-guard` to inspect state, or `off|on|reset` to disable, re-enable, or clear
+counters.
+
 ### 📖 Markdown viewer
 
 Use `/md <path>` or `/markdown <path>` to open a local `.md` or `.markdown` file:

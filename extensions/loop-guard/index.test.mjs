@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { registerLoopGuardExtension } from "./index.ts";
+import { DEFAULT_LOOP_OPTIONS } from "./loop-detector.ts";
+import loopGuardExtension, { registerLoopGuardExtension } from "./index.ts";
 
 function fakePi() {
   const commands = new Map();
@@ -110,6 +111,18 @@ test("/loop-guard off disables detection", async () => {
     await toolCall(pi, ctx, "bash", { command: "git status" }, `d${i}`);
   }
   assert.equal(ctx.aborted, false);
+});
+
+test("default export is enabled out of the box with no configuration", async () => {
+  const pi = fakePi();
+  const ctx = fakeCtx();
+  loopGuardExtension(pi);
+  assert.ok(pi.commands.has("loop-guard"), "loop-guard command must be registered");
+  pi.handlers.get("agent_start")({}, ctx);
+  for (let i = 0; i < DEFAULT_LOOP_OPTIONS.maxRepeatedCalls; i += 1) {
+    await toolCall(pi, ctx, "bash", { command: "git status" }, `z${i}`);
+  }
+  assert.equal(ctx.aborted, true, "loop guard must interrupt by default without any opt-in");
 });
 
 test("argument key order does not evade detection", async () => {
