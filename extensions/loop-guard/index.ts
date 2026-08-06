@@ -47,7 +47,9 @@ export function registerLoopGuardExtension(
   };
   let mode: LoopGuardMode = "on";
   let snoozed = false;
-  let lastDetection: LoopGuardDetection = { kind: "none" };
+  /** At most one interrupt per agent run: approval aborts the run, and a
+   * decline snoozes the rest of the run, so a second interrupt is moot. */
+  let interruptRequested = false;
 
   pi.registerCommand("loop-guard", {
     description: "Show loop-guard state or use /loop-guard off|on|reset",
@@ -72,7 +74,7 @@ export function registerLoopGuardExtension(
         return;
       }
       ctx.ui.notify(
-        formatState(mode, toolDetector.callCount, outputDetector.outputChars, lastDetection, effective),
+        formatState(mode, toolDetector.callCount, outputDetector.outputChars, effective),
         "info",
       );
     },
@@ -82,22 +84,21 @@ export function registerLoopGuardExtension(
     toolDetector.reset();
     outputDetector.reset();
     snoozed = false;
-    lastDetection = { kind: "none" };
+    interruptRequested = false;
   });
 
   pi.on("tool_call", async (event, ctx) => {
-    if (mode === "off" || snoozed) return;
+    if (mode === "off" || snoozed || interruptRequested) return;
     const call: ToolCallRecord = {
       tool: event.toolName,
       input: serializeInput(event.input),
-      callId: event.toolCallId,
     };
     const detection = toolDetector.record(call);
     if (detection.kind !== "none") await interrupt(ctx, detection);
   });
 
   pi.on("message_update", async (event, ctx) => {
-    if (mode === "off" || snoozed) return;
+    if (mode === "off" || snoozed || interruptRequested) return;
     const streamEvent = event.assistantMessageEvent;
     if (streamEvent.type !== "text_delta" && streamEvent.type !== "thinking_delta") return;
     const detection = outputDetector.feed(streamEvent.delta);
@@ -105,8 +106,8 @@ export function registerLoopGuardExtension(
   });
 
   async function interrupt(ctx: ExtensionContext, detection: LoopGuardDetection): Promise<void> {
-    if (lastDetection.kind === detection.kind) return;
-    lastDetection = detection;
+    if (interruptRequested) return;
+    interruptRequested = true;
 
     const explanation = describeLoop(detection);
     if (!ctx.hasUI || ctx.mode !== "tui") {
@@ -159,25 +160,22 @@ function formatState(
   mode: LoopGuardMode,
   calls: number,
   outputChars: number,
-  detection: LoopGuardDetection,
   options: Required<LoopGuardOptions>,
 ): string {
-  const detectionLine = detection.kind === "none"
-    ? "No loop detected."
-    : `${describeLoop(detection)}`;
   return [
     `Loop guard: ${mode}`,
     `Tool calls this run: ${calls}`,
     `Streaming output chars: ${outputChars}`,
-    `Detected: ${detectionLine}`,
     `Thresholds: repeat=${options.maxRepeatedCalls}, cycle repeats=${options.minCycleRepetitions}, total=${options.maxTotalCalls}, phrase repeats=${options.maxRepeatedPhrases}`,
   ].join("\n");
 }
 
 /** Stable JSON serialization with sorted object keys so argument reordering
- * cannot evade loop detection. */
+ * cannot evade loop detection. Always returns a string (undefined input maps
+ * to "{}"). */
 function serializeInput(input: unknown): string {
-  return JSON.stringify(sortKeys(input));
+  const value = input === undefined ? {} : input;
+  return JSON.stringify(sortKeys(value));
 }
 
 function sortKeys(value: unknown): unknown {

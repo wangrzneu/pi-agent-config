@@ -11,7 +11,6 @@ export interface ToolCallRecord {
   tool: string;
   /** Deterministic serialization of the tool arguments (keys sorted). */
   input: string;
-  callId: string;
 }
 
 export interface LoopDetectOptions {

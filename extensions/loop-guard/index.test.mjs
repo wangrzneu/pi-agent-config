@@ -161,6 +161,39 @@ test("verbal loop abort works without UI and with snooze", async () => {
   assert.equal(noUi.aborted, true);
 });
 
+test("only one interrupt is requested per agent run while a prompt is pending", async () => {
+  const pi = installed();
+  // Keep the first confirm open until the test resolves it.
+  let resolveConfirm;
+  const confirmation = new Promise((resolve) => { resolveConfirm = resolve; });
+  const ctx = fakeCtx(async () => confirmation);
+  ctx.confirmCalls = 0;
+  const realConfirm = ctx.ui.confirm;
+  ctx.ui.confirm = async (title, message) => { ctx.confirmCalls += 1; return realConfirm(title, message); };
+  pi.handlers.get("agent_start")({}, ctx);
+
+  // Fire the tool-call repeat; its confirm is now pending.
+  const first = (async () => {
+    for (let i = 0; i < 3; i += 1) {
+      await toolCall(pi, ctx, "bash", { command: "git status" }, `q${i}`);
+    }
+  })();
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.equal(ctx.confirmCalls, 1);
+
+  // A second, different detection (verbal loop) lands while pending: no repeat.
+  await messageUpdate(pi, ctx, "现在执行 lldb。");
+  await messageUpdate(pi, ctx, "现在执行 lldb。");
+  await messageUpdate(pi, ctx, "现在执行 lldb。");
+  assert.equal(ctx.confirmCalls, 1, "second detection must not stack another prompt");
+
+  // Resolve the pending prompt so the interrupted tool loop completes and the
+  // run aborts.
+  resolveConfirm(true);
+  await first;
+  assert.equal(ctx.aborted, true);
+});
+
 test("argument key order does not evade detection", async () => {
   const pi = installed();
   const ctx = fakeCtx();

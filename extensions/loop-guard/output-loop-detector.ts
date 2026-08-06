@@ -36,6 +36,9 @@ export const DEFAULT_OUTPUT_LOOP_OPTIONS: Required<OutputLoopOptions> = {
 
 export class OutputLoopDetector {
   private buffer = "";
+  /** Total characters fed so far (monotonic; unaffected by window slicing). */
+  private fedChars = 0;
+  /** fedChars at the last analysis, used as the throttle watermark. */
   private lastAnalyzedChars = 0;
   private readonly options: Required<OutputLoopOptions>;
 
@@ -45,6 +48,7 @@ export class OutputLoopDetector {
 
   reset(): void {
     this.buffer = "";
+    this.fedChars = 0;
     this.lastAnalyzedChars = 0;
   }
 
@@ -59,10 +63,11 @@ export class OutputLoopDetector {
     if (this.buffer.length > this.options.windowChars) {
       this.buffer = this.buffer.slice(-this.options.windowChars);
     }
-    if (this.buffer.length - this.lastAnalyzedChars < this.options.analyzeEveryChars) {
+    this.fedChars += delta.length;
+    if (this.fedChars - this.lastAnalyzedChars < this.options.analyzeEveryChars) {
       return undefined;
     }
-    this.lastAnalyzedChars = this.buffer.length;
+    this.lastAnalyzedChars = this.fedChars;
     return this.analyze();
   }
 

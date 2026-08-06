@@ -83,7 +83,35 @@ test("window is bounded to the most recent text", () => {
   assert.equal(detector.feed(`target.${filler}`), undefined);
   const detection = detector.feed("target.");
   assert.equal(detection?.kind, "phrase-repeat");
-  // A third repeat scrolls the first one out of the window; counts drop.
+  // A third repeat scrolls the first one out of the window; the buffer stays bounded.
   detector.feed(`${filler}target.`);
   assert.equal(detector.outputChars <= 120, true);
+});
+
+test("detection keeps working after the window overflows", () => {
+  const detector = new OutputLoopDetector({
+    maxRepeatedPhrases: 3,
+    windowChars: 100,
+    analyzeEveryChars: 1,
+  });
+  // Overflow the window with filler first (more than windowChars).
+  assert.equal(detector.feed("f".repeat(150)), undefined);
+  assert.equal(detector.outputChars, 100);
+
+  // Repeating the phrase must still be detected after the overflow. The first
+  // phrase shares the window with leftover filler, so four feeds are needed
+  // for three clean duplicates.
+  for (let i = 0; i < 3; i += 1) {
+    assert.equal(detector.feed("现在执行 lldb。"), undefined);
+  }
+  const detection = detector.feed("现在执行 lldb。");
+  assert.equal(detection?.kind, "phrase-repeat");
+  assert.equal(detection.phrase, "现在执行 lldb");
+
+  // And detection still fires after further overflow.
+  assert.equal(detector.feed("g".repeat(300)), undefined);
+  for (let i = 0; i < 3; i += 1) {
+    assert.equal(detector.feed("同一个句子。"), undefined);
+  }
+  assert.equal(detector.feed("同一个句子。").kind, "phrase-repeat");
 });

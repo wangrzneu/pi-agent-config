@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { LoopDetector } from "./loop-detector.ts";
 
-function call(tool, input = "{}", callId = `${tool}-${input}`) {
-  return { tool, input, callId };
+function call(tool, input = "{}") {
+  return { tool, input };
 }
 
 test("does not trigger on a diverse sequence", () => {
