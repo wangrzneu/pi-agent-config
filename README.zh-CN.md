@@ -28,6 +28,7 @@
 | 🌐 **SSH 工具** | 轻量、按能力细分的 SSH 执行、传输与远程作业 |
 | 🛡️ **沙箱** | 对本地 shell 命令实施 fail-closed 的操作系统级沙箱 |
 | 🧠 **外部记忆** | 可选的项目级同步目录记忆，压缩时捕获、两阶段召回 |
+| 🔁 **循环守卫** | 检测重复的工具调用并打断卡住的 agent 循环 |
 | 🧭 **工作流 skill** | 精简的默认工作规范 |
 | 🧩 **提示词** | 按需使用的 review / debugging / architecture 提示词 |
 | 📚 **文档** | 代码探索、外部项目与安全边界参考文档 |
@@ -43,6 +44,7 @@
 | `extensions/ssh-tools/` | 按需发现的 SSH 执行、文件传输和远程作业工具 |
 | `extensions/sandbox/` | 对本地 shell 命令实施 fail-closed 的操作系统级沙箱 |
 | `extensions/external-memory/` | 可选的项目级同步目录记忆，压缩时捕获、两阶段召回 |
+| `extensions/loop-guard/` | 检测重复的工具调用并打断卡住的 agent 循环 |
 | `skills/pi-workflow/` | 精简的默认工作规范 |
 | `prompts/` | 按需使用的 review、debugging 和 architecture 提示词 |
 | `docs/` | 代码探索、外部项目和安全边界参考文档 |

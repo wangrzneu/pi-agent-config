@@ -28,6 +28,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | 🌐 **SSH tools** | Lightweight, capability-scoped SSH execution, transfer, and jobs |
 | 🛡️ **Sandbox** | Fail-closed OS sandbox for local shell commands |
 | 🧠 **External memory** | Opt-in synced-folder memory captured at compaction with two-stage recall |
+| 🔁 **Loop guard** | Detect repeated tool calls and interrupt stuck agent loops |
 | 🧭 **Workflow skill** | Concise default working guidelines |
 | 🧩 **Prompts** | On-demand review / debugging / architecture prompts |
 | 📚 **Docs** | Reference docs for exploration, external projects, and security |
@@ -43,6 +44,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | `extensions/ssh-tools/` | Dynamically discovered SSH execution, transfer, and remote job tools |
 | `extensions/sandbox/` | Fail-closed OS sandboxing for local shell commands |
 | `extensions/external-memory/` | Opt-in synced-folder memory captured at compaction with two-stage recall |
+| `extensions/loop-guard/` | Detect repeated tool calls and interrupt stuck agent loops |
 | `skills/pi-workflow/` | Concise default working guidelines |
 | `prompts/` | On-demand prompts for review, debugging, and architecture tasks |
 | `docs/` | Reference documentation for code exploration, external projects, and security boundaries |
