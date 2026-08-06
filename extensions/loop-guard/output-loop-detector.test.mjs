@@ -1,0 +1,89 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  extractPhrases,
+  OutputLoopDetector,
+} from "./output-loop-detector.ts";
+
+test("detects a repeated CJK sentence in streamed output", () => {
+  const detector = new OutputLoopDetector({ maxRepeatedPhrases: 3, analyzeEveryChars: 1 });
+  let detection;
+  for (let i = 0; i < 2; i += 1) {
+    detection = detector.feed("现在执行 lldb。");
+    assert.equal(detection, undefined);
+  }
+  detection = detector.feed("现在执行 lldb。");
+  assert.deepEqual(detection, { kind: "phrase-repeat", phrase: "现在执行 lldb", count: 3 });
+});
+
+test("detects repeats even when streamed in partial token chunks", () => {
+  const detector = new OutputLoopDetector({ maxRepeatedPhrases: 3, analyzeEveryChars: 1 });
+  // Each sentence arrives fragmented across multiple deltas. The third
+  // sentence is completed by the fourth delta, which crosses the threshold.
+  assert.equal(detector.feed("现在执行 ll"), undefined);
+  assert.equal(detector.feed("db。现在执行 "), undefined);
+  assert.equal(detector.feed("lldb。现在执行 "), undefined);
+  const detection = detector.feed("lldb。");
+  assert.deepEqual(detection, { kind: "phrase-repeat", phrase: "现在执行 lldb", count: 3 });
+});
+
+test("does not detect on diverse prose", () => {
+  const detector = new OutputLoopDetector({ maxRepeatedPhrases: 3, analyzeEveryChars: 1 });
+  for (const sentence of [
+    "First we inspect the logs.",
+    "The build failed on the test step.",
+    "Fix the import and rerun the suite.",
+  ]) {
+    assert.equal(detector.feed(sentence), undefined);
+  }
+});
+
+test("short phrases are ignored", () => {
+  const detector = new OutputLoopDetector({
+    maxRepeatedPhrases: 2,
+    minPhraseLength: 8,
+    analyzeEveryChars: 1,
+  });
+  for (let i = 0; i < 3; i += 1) {
+    assert.equal(detector.feed("done."), undefined);
+  }
+});
+
+test("reset clears the window", () => {
+  const detector = new OutputLoopDetector({ maxRepeatedPhrases: 2, analyzeEveryChars: 1 });
+  detector.feed("loop phrase one.");
+  detector.feed("loop phrase one.");
+  assert.ok(detector.feed("loop phrase one."));
+  detector.reset();
+  assert.equal(detector.outputChars, 0);
+  assert.equal(detector.feed("loop phrase one."), undefined);
+});
+
+test("extractPhrases splits CJK and Latin sentences and normalizes whitespace", () => {
+  const phrases = extractPhrases(
+    "现在执行 lldb。Now run the tool.  另  一个 短语！",
+    4,
+  );
+  assert.deepEqual(phrases, [
+    "现在执行 lldb",
+    "Now run the tool",
+    "另 一个 短语",
+  ]);
+});
+
+test("window is bounded to the most recent text", () => {
+  const detector = new OutputLoopDetector({
+    maxRepeatedPhrases: 2,
+    windowChars: 120,
+    analyzeEveryChars: 1,
+  });
+  // 40 chars of filler between each repeat so only two repeats fit in 120 chars.
+  const filler = "x".repeat(40);
+  assert.equal(detector.feed(`target.${filler}`), undefined);
+  assert.equal(detector.feed(`target.${filler}`), undefined);
+  const detection = detector.feed("target.");
+  assert.equal(detection?.kind, "phrase-repeat");
+  // A third repeat scrolls the first one out of the window; counts drop.
+  detector.feed(`${filler}target.`);
+  assert.equal(detector.outputChars <= 120, true);
+});

@@ -1,4 +1,7 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import {
   DEFAULT_LOOP_OPTIONS,
   LoopDetector,
@@ -6,28 +9,45 @@ import {
   type LoopDetectOptions,
   type ToolCallRecord,
 } from "./loop-detector.ts";
+import {
+  DEFAULT_OUTPUT_LOOP_OPTIONS,
+  OutputLoopDetector,
+  type OutputLoopDetection,
+  type OutputLoopOptions,
+} from "./output-loop-detector.ts";
 
 type LoopGuardMode = "on" | "off";
 
+type LoopGuardDetection = LoopDetection | OutputLoopDetection;
+
+export interface LoopGuardOptions extends LoopDetectOptions, OutputLoopOptions {}
+
 /**
- * Loop guard: watches tool calls inside one agent run and, when the model
- * starts repeating the same tool call over and over (an agent loop that never
- * finishes), asks the user whether to abort the run — or aborts directly when
- * no interactive UI is available so a print/RPC run cannot hang forever.
+ * Loop guard: watches tool calls and streamed output inside one agent run.
+ * When the model starts repeating the same tool call — or the same sentence —
+ * over and over without making progress (an agent loop that never finishes),
+ * it asks the user whether to abort the run, or aborts directly when no
+ * interactive UI is available so a print/RPC run cannot hang forever.
  *
  * See https://github.com/QwenLM/qwen-code/issues/4055 for the class of
- * problem this addresses: an agent stuck cycling through tool calls with no
- * way for the user to interrupt it.
+ * problem this addresses: an agent stuck cycling through tool calls (or stuck
+ * verbally repeating the same intent without ever calling a tool) with no way
+ * for the user to interrupt it.
  */
 export function registerLoopGuardExtension(
   pi: ExtensionAPI,
-  options: LoopDetectOptions = {},
+  options: LoopGuardOptions = {},
 ): void {
-  const detector = new LoopDetector(options);
-  const effective = { ...DEFAULT_LOOP_OPTIONS, ...options };
+  const toolDetector = new LoopDetector(options);
+  const outputDetector = new OutputLoopDetector(options);
+  const effective = {
+    ...DEFAULT_LOOP_OPTIONS,
+    ...DEFAULT_OUTPUT_LOOP_OPTIONS,
+    ...options,
+  };
   let mode: LoopGuardMode = "on";
   let snoozed = false;
-  let lastDetection: LoopDetection = { kind: "none" };
+  let lastDetection: LoopGuardDetection = { kind: "none" };
 
   pi.registerCommand("loop-guard", {
     description: "Show loop-guard state or use /loop-guard off|on|reset",
@@ -40,21 +60,27 @@ export function registerLoopGuardExtension(
       }
       if (action === "on") {
         mode = "on";
-        detector.reset();
+        toolDetector.reset();
+        outputDetector.reset();
         ctx.ui.notify("Loop guard enabled.", "info");
         return;
       }
       if (action === "reset") {
-        detector.reset();
+        toolDetector.reset();
+        outputDetector.reset();
         ctx.ui.notify("Loop guard counters reset.", "info");
         return;
       }
-      ctx.ui.notify(formatState(mode, detector.callCount, lastDetection, effective), "info");
+      ctx.ui.notify(
+        formatState(mode, toolDetector.callCount, outputDetector.outputChars, lastDetection, effective),
+        "info",
+      );
     },
   });
 
   pi.on("agent_start", () => {
-    detector.reset();
+    toolDetector.reset();
+    outputDetector.reset();
     snoozed = false;
     lastDetection = { kind: "none" };
   });
@@ -66,8 +92,20 @@ export function registerLoopGuardExtension(
       input: serializeInput(event.input),
       callId: event.toolCallId,
     };
-    const detection = detector.record(call);
-    if (detection.kind === "none") return;
+    const detection = toolDetector.record(call);
+    if (detection.kind !== "none") await interrupt(ctx, detection);
+  });
+
+  pi.on("message_update", async (event, ctx) => {
+    if (mode === "off" || snoozed) return;
+    const streamEvent = event.assistantMessageEvent;
+    if (streamEvent.type !== "text_delta" && streamEvent.type !== "thinking_delta") return;
+    const detection = outputDetector.feed(streamEvent.delta);
+    if (detection) await interrupt(ctx, detection);
+  });
+
+  async function interrupt(ctx: ExtensionContext, detection: LoopGuardDetection): Promise<void> {
+    if (lastDetection.kind === detection.kind) return;
     lastDetection = detection;
 
     const explanation = describeLoop(detection);
@@ -88,14 +126,14 @@ export function registerLoopGuardExtension(
       snoozed = true;
       ctx.ui.notify("Loop guard paused until the next agent run.", "info");
     }
-  });
+  }
 }
 
 export default function loopGuardExtension(pi: ExtensionAPI): void {
   registerLoopGuardExtension(pi);
 }
 
-function describeLoop(detection: LoopDetection): string {
+function describeLoop(detection: LoopGuardDetection): string {
   switch (detection.kind) {
     case "repeat":
       return `The same tool call was repeated ${detection.count} times in a row: ${summarizeCall(detection.call)}`;
@@ -103,6 +141,8 @@ function describeLoop(detection: LoopDetection): string {
       return `An identical call sequence of period ${detection.period} repeated ${detection.repetitions} times: ${detection.sequence.map(summarizeCall).join(" then ")}`;
     case "total":
       return `The agent made ${detection.count} tool calls without completing the run.`;
+    case "phrase-repeat":
+      return `The model repeated the same output phrase ${detection.count} times: “${detection.phrase}”`;
     case "none":
       return "";
   }
@@ -118,8 +158,9 @@ function summarizeCall(call: ToolCallRecord): string {
 function formatState(
   mode: LoopGuardMode,
   calls: number,
-  detection: LoopDetection,
-  options: Required<LoopDetectOptions>,
+  outputChars: number,
+  detection: LoopGuardDetection,
+  options: Required<LoopGuardOptions>,
 ): string {
   const detectionLine = detection.kind === "none"
     ? "No loop detected."
@@ -127,8 +168,9 @@ function formatState(
   return [
     `Loop guard: ${mode}`,
     `Tool calls this run: ${calls}`,
+    `Streaming output chars: ${outputChars}`,
     `Detected: ${detectionLine}`,
-    `Thresholds: repeat=${options.maxRepeatedCalls}, cycle repeats=${options.minCycleRepetitions}, total=${options.maxTotalCalls}`,
+    `Thresholds: repeat=${options.maxRepeatedCalls}, cycle repeats=${options.minCycleRepetitions}, total=${options.maxTotalCalls}, phrase repeats=${options.maxRepeatedPhrases}`,
   ].join("\n");
 }
 
@@ -149,5 +191,3 @@ function sortKeys(value: unknown): unknown {
   }
   return value;
 }
-
-

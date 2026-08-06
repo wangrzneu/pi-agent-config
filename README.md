@@ -28,7 +28,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | 🌐 **SSH tools** | Lightweight, capability-scoped SSH execution, transfer, and jobs |
 | 🛡️ **Sandbox** | Fail-closed OS sandbox for local shell commands |
 | 🧠 **External memory** | Opt-in synced-folder memory captured at compaction with two-stage recall |
-| 🔁 **Loop guard** | Detect repeated tool calls and interrupt stuck agent loops |
+| 🔁 **Loop guard** | Detect repeated tool calls *or repeated output phrases* and interrupt stuck agent loops |
 | 🧭 **Workflow skill** | Concise default working guidelines |
 | 🧩 **Prompts** | On-demand review / debugging / architecture prompts |
 | 📚 **Docs** | Reference docs for exploration, external projects, and security |
@@ -184,11 +184,18 @@ Classification results are not added to the session or main model context.
 
 ### 🔁 Loop guard
 
-Enabled by default. While an agent run is active, the loop guard tracks tool calls and detects stuck
-loops: the same call repeated in a row (5+, configurable), an identical 2/3-step call cycle, or a run
-that exceeds 120 tool calls. On detection it asks whether to abort the run (and aborts directly in
-print/RPC mode). Use `/loop-guard` to inspect state, or `off|on|reset` to disable, re-enable, or clear
-counters.
+Enabled by default. While an agent run is active, the loop guard tracks tool calls **and the model's
+streamed output** and detects stuck loops:
+
+- the same tool call repeated in a row (5+, configurable);
+- an identical 2/3-step call cycle;
+- a run that exceeds 120 tool calls;
+- the same sentence or phrase repeated in the streamed output (6+, configurable) — this catches a
+  model that is verbally stuck repeating an intent ("now run lldb…", "now run lldb…") without ever
+  making the tool call.
+
+On detection it asks whether to abort the run (and aborts directly in print/RPC mode). Use
+`/loop-guard` to inspect state, or `off|on|reset` to disable, re-enable, or clear counters.
 
 ### 📖 Markdown viewer
 

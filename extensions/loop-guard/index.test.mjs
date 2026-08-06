@@ -42,6 +42,8 @@ function installed() {
     maxRepeatedCalls: 3,
     minCycleRepetitions: 2,
     maxTotalCalls: 10,
+    maxRepeatedPhrases: 3,
+    analyzeEveryChars: 1,
   });
   return pi;
 }
@@ -123,6 +125,40 @@ test("default export is enabled out of the box with no configuration", async () 
     await toolCall(pi, ctx, "bash", { command: "git status" }, `z${i}`);
   }
   assert.equal(ctx.aborted, true, "loop guard must interrupt by default without any opt-in");
+});
+
+function messageUpdate(pi, ctx, delta, streamType = "text_delta") {
+  return pi.handlers.get("message_update")({
+    message: { role: "assistant" },
+    assistantMessageEvent: { type: streamType, delta, partial: {} },
+  }, ctx);
+}
+
+test("aborts on a verbal loop in streamed output (with confirmation)", async () => {
+  const pi = installed();
+  const ctx = fakeCtx();
+  pi.handlers.get("agent_start")({}, ctx);
+
+  // Two repeats are not enough (custom threshold 3).
+  await messageUpdate(pi, ctx, "现在执行 lldb。");
+  await messageUpdate(pi, ctx, "现在执行 lldb。");
+  assert.equal(ctx.aborted, false);
+
+  await messageUpdate(pi, ctx, "现在执行 lldb。");
+  assert.equal(ctx.aborted, true);
+  assert.match(ctx.notifications.join("\n"), /Aborted agent run.*现在执行 lldb/);
+});
+
+test("verbal loop abort works without UI and with snooze", async () => {
+  const pi = installed();
+  const noUi = fakeCtx();
+  noUi.hasUI = false;
+  noUi.mode = "print";
+  pi.handlers.get("agent_start")({}, noUi);
+  for (let i = 0; i < 3; i += 1) {
+    await messageUpdate(pi, noUi, "同一个句子。");
+  }
+  assert.equal(noUi.aborted, true);
 });
 
 test("argument key order does not evade detection", async () => {
