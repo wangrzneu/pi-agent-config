@@ -79,12 +79,94 @@ test("does not trigger a cycle when inputs differ between repetitions", () => {
   }
 });
 
-test("triggers total after maxTotalCalls", () => {
-  const detector = new LoopDetector({ maxTotalCalls: 4, maxRepeatedCalls: 100, minCycleRepetitions: 100 });
-  for (let i = 0; i < 3; i += 1) {
+test("total fires at maxTotalCalls only when the tail repeats consecutively", () => {
+  const detector = new LoopDetector({
+    maxTotalCalls: 5,
+    totalWindowCalls: 3,
+    maxRepeatedCalls: 100,
+    minCycleRepetitions: 100,
+  });
+  // A diverse run that exceeds the limit with no consecutive repetition in
+  // the window is making progress and is never interrupted.
+  let result = detector.record(call("read", "{\"path\":\"a.ts\"}"));
+  assert.equal(result.kind, "none");
+  result = detector.record(call("read", "{\"path\":\"b.ts\"}"));
+  assert.equal(result.kind, "none");
+  result = detector.record(call("read", "{\"path\":\"c.ts\"}"));
+  assert.equal(result.kind, "none");
+  result = detector.record(call("read", "{\"path\":\"d.ts\"}"));
+  assert.equal(result.kind, "none");
+  result = detector.record(call("read", "{\"path\":\"e.ts\"}")); // count=5 = maxTotalCalls
+  assert.equal(result.kind, "none", "diverse tail must not fire total");
+
+  // A scattered repeated pair earlier does NOT trigger total: only a
+  // *consecutive* run in the tail matters (repetition happening now).
+  const detector2 = new LoopDetector({
+    maxTotalCalls: 5,
+    totalWindowCalls: 3,
+    maxRepeatedCalls: 100,
+    minCycleRepetitions: 100,
+  });
+  for (const next of [
+    call("bash", "{\"command\":\"npm test\"}"), // 1
+    call("read", "{\"path\":\"log.txt\"}"), // 2
+    call("bash", "{\"command\":\"npm test\"}"), // 3
+    call("read", "{\"path\":\"log.txt\"}"), // 4
+  ]) {
+    assert.equal(detector2.record(next).kind, "none");
+  }
+  // 5th call: tail(3) = [bash, read, bash] — the bash pair is NOT adjacent →
+  // no consecutive repetition, so total must NOT fire.
+  assert.equal(detector2.record(call("bash", "{\"command\":\"npm test\"}")).kind, "none");
+
+  // Consecutive repetition in the tail (read, read) fires total at the budget.
+  const detector3 = new LoopDetector({
+    maxTotalCalls: 4,
+    totalWindowCalls: 3,
+    maxRepeatedCalls: 100,
+    minCycleRepetitions: 100,
+  });
+  for (const next of [
+    call("bash", "{\"command\":\"npm test\"}"), // 1
+    call("read", "{\"path\":\"log.txt\"}"), // 2
+    call("read", "{\"path\":\"log.txt\"}"), // 3
+  ]) {
+    assert.equal(detector3.record(next).kind, "none");
+  }
+  // 4th call: count reaches maxTotalCalls; tail(3) = [read, read, read] has
+  // consecutive repeats → total.
+  const detection = detector3.record(call("read", "{\"path\":\"log.txt\"}"));
+  assert.equal(detection.kind, "total");
+  assert.equal(detection.count, 4);
+});
+
+test("repeat fires before total when both are crossed", () => {
+  // A run that exceeds maxTotalCalls with an active consecutive-repeat must
+  // report the precise repeat, not the coarse total.
+  const detector = new LoopDetector({
+    maxTotalCalls: 3,
+    totalWindowCalls: 5,
+    maxRepeatedCalls: 2,
+    minCycleRepetitions: 100,
+  });
+  assert.equal(detector.record(call("bash", "{\"command\":\"git status\"}")).kind, "none");
+  const detection = detector.record(call("bash", "{\"command\":\"git status\"}"));
+  assert.equal(detection.kind, "repeat");
+  assert.equal(detection.count, 2);
+});
+
+test("long diverse runs are never interrupted regardless of total threshold", () => {
+  // All calls distinct: even far above maxTotalCalls the run is progress.
+  const detector = new LoopDetector({
+    maxTotalCalls: 6,
+    totalWindowCalls: 50,
+    maxRepeatedCalls: 100,
+    minCycleRepetitions: 100,
+  });
+  for (let i = 0; i < 10; i += 1) {
     assert.equal(detector.record(call("bash", `{\"n\":${i}}`)).kind, "none");
   }
-  assert.deepEqual(detector.record(call("bash", "{\"n\":3}")), { kind: "total", count: 4 });
+  assert.equal(detector.callCount, 10);
 });
 
 test("reset clears counters", () => {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEFAULT_OUTPUT_LOOP_OPTIONS,
   extractPhrases,
   OutputLoopDetector,
 } from "./output-loop-detector.ts";
@@ -27,6 +28,32 @@ test("detects repeats even when streamed in partial token chunks", () => {
   assert.deepEqual(detection, { kind: "phrase-repeat", phrase: "现在执行 lldb", count: 3 });
 });
 
+test("short and letter-free phrases never trigger", () => {
+  const detector = new OutputLoopDetector({
+    maxRepeatedPhrases: 2,
+    minPhraseLength: 4,
+    analyzeEveryChars: 1,
+  });
+  // Letter-free separators and too-short fragments are not repetition signal.
+  for (let i = 0; i < 4; i += 1) {
+    assert.equal(detector.feed("====="), undefined);
+    assert.equal(detector.feed("111 222"), undefined);
+    assert.equal(detector.feed("a"), undefined);
+  }
+  // A real phrase still fires.
+  for (let i = 0; i < 2; i += 1) {
+    assert.equal(detector.feed("执行第一次指令。"), undefined);
+  }
+  assert.deepEqual(
+    detector.feed("执行第一次指令。"),
+    { kind: "phrase-repeat", phrase: "执行第一次指令", count: 2 },
+  );
+});
+
+test("default thinking threshold is more sensitive than text", () => {
+  assert.ok(DEFAULT_OUTPUT_LOOP_OPTIONS.maxRepeatedPhrasesThinking < DEFAULT_OUTPUT_LOOP_OPTIONS.maxRepeatedPhrases);
+});
+
 test("does not detect on diverse prose", () => {
   const detector = new OutputLoopDetector({ maxRepeatedPhrases: 3, analyzeEveryChars: 1 });
   for (const sentence of [
@@ -38,14 +65,10 @@ test("does not detect on diverse prose", () => {
   }
 });
 
-test("short phrases are ignored", () => {
-  const detector = new OutputLoopDetector({
-    maxRepeatedPhrases: 2,
-    minPhraseLength: 8,
-    analyzeEveryChars: 1,
-  });
-  for (let i = 0; i < 3; i += 1) {
-    assert.equal(detector.feed("done."), undefined);
+test("short phrases are ignored by the default minimum length", () => {
+  const detector = new OutputLoopDetector({ maxRepeatedPhrases: 2, analyzeEveryChars: 1 });
+  for (let i = 0; i < 4; i += 1) {
+    assert.equal(detector.feed("done."), undefined); // 4 chars < default 8
   }
 });
 
@@ -71,9 +94,16 @@ test("extractPhrases splits CJK and Latin sentences and normalizes whitespace", 
   ]);
 });
 
+test("extractPhrases drops letter-free and too-short fragments", () => {
+  assert.deepEqual(extractPhrases("=====  111 222  ...  a", 4), []);
+  // "ok" is 2 chars < 4; "111" is letter-free; only "fine" survives.
+  assert.deepEqual(extractPhrases("ok. 111. fine", 4), ["fine"]);
+});
+
 test("window is bounded to the most recent text", () => {
   const detector = new OutputLoopDetector({
     maxRepeatedPhrases: 2,
+    minPhraseLength: 4,
     windowChars: 120,
     analyzeEveryChars: 1,
   });
@@ -91,6 +121,7 @@ test("window is bounded to the most recent text", () => {
 test("detection keeps working after the window overflows", () => {
   const detector = new OutputLoopDetector({
     maxRepeatedPhrases: 3,
+    minPhraseLength: 4,
     windowChars: 100,
     analyzeEveryChars: 1,
   });

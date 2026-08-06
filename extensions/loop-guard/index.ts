@@ -20,14 +20,24 @@ type LoopGuardMode = "on" | "off";
 
 type LoopGuardDetection = LoopDetection | OutputLoopDetection;
 
-export interface LoopGuardOptions extends LoopDetectOptions, OutputLoopOptions {}
+export interface LoopGuardOptions extends LoopDetectOptions, OutputLoopOptions {
+  /**
+   * After aborting one run, leave the next agent run uninterrupted (default
+   * true) so a false positive cannot become repeated interruptions. Detection
+   * re-arms on the run after that.
+   */
+  cooldownRuns?: number;
+}
 
 /**
  * Loop guard: watches tool calls and streamed output inside one agent run.
  * When the model starts repeating the same tool call — or the same sentence —
  * over and over without making progress (an agent loop that never finishes),
- * it asks the user whether to abort the run, or aborts directly when no
- * interactive UI is available so a print/RPC run cannot hang forever.
+ * it aborts the run silently (no confirmation dialog) and reports once. This
+ * follows Grok Build's doom-loop recovery posture: act only on confident,
+ * conservative signals, and never keep interrupting — one abort per run, and
+ * the next run is left uninterrupted so a false positive cannot turn into
+ * repeated user disruption.
  *
  * See https://github.com/QwenLM/qwen-code/issues/4055 for the class of
  * problem this addresses: an agent stuck cycling through tool calls (or stuck
@@ -39,17 +49,34 @@ export function registerLoopGuardExtension(
   options: LoopGuardOptions = {},
 ): void {
   const toolDetector = new LoopDetector(options);
-  const outputDetector = new OutputLoopDetector(options);
-  const effective = {
+  // Thinking and visible text are tracked separately: thinking repetition is
+  // the strongest "stuck" signal (Grok Build only acts on the thinking
+  // channel), while visible-output repetition needs a much higher threshold
+  // because a false positive there is far more disruptive.
+  const thinkingDetector = new OutputLoopDetector({
+    ...options,
+    maxRepeatedPhrases:
+      options.maxRepeatedPhrases ?? options.maxRepeatedPhrasesThinking ?? DEFAULT_OUTPUT_LOOP_OPTIONS.maxRepeatedPhrasesThinking,
+  });
+  const textDetector = new OutputLoopDetector({
+    ...options,
+    maxRepeatedPhrases:
+      options.maxRepeatedPhrases ?? DEFAULT_OUTPUT_LOOP_OPTIONS.maxRepeatedPhrases,
+  });
+  const effective: Required<LoopGuardOptions> = {
     ...DEFAULT_LOOP_OPTIONS,
     ...DEFAULT_OUTPUT_LOOP_OPTIONS,
+    cooldownRuns: 1,
     ...options,
   };
   let mode: LoopGuardMode = "on";
-  let snoozed = false;
-  /** At most one interrupt per agent run: approval aborts the run, and a
-   * decline snoozes the rest of the run, so a second interrupt is moot. */
-  let interruptRequested = false;
+  /** At most one abort per agent run. */
+  let abortedThisRun = false;
+  /** Runs left to skip detection for after a false-positive abort. */
+  let cooldownRunsLeft = 0;
+  /** Whether the current run is a cooldown run (detection skipped). */
+  let skipThisRun = false;
+
 
   pi.registerCommand("loop-guard", {
     description: "Show loop-guard state or use /loop-guard off|on|reset",
@@ -62,70 +89,104 @@ export function registerLoopGuardExtension(
       }
       if (action === "on") {
         mode = "on";
-        toolDetector.reset();
-        outputDetector.reset();
+        resetDetectors();
+        cooldownRunsLeft = 0;
+        skipThisRun = false;
         ctx.ui.notify("Loop guard enabled.", "info");
         return;
       }
       if (action === "reset") {
-        toolDetector.reset();
-        outputDetector.reset();
+        resetDetectors();
+        cooldownRunsLeft = 0;
+        skipThisRun = false;
         ctx.ui.notify("Loop guard counters reset.", "info");
         return;
       }
       ctx.ui.notify(
-        formatState(mode, toolDetector.callCount, outputDetector.outputChars, effective),
+        formatState(
+          mode,
+          toolDetector.callCount,
+          textDetector.outputChars,
+          thinkingDetector.outputChars,
+          effective,
+          cooldownRunsLeft,
+        ),
         "info",
       );
     },
   });
 
-  pi.on("agent_start", () => {
+  function resetDetectors(): void {
     toolDetector.reset();
-    outputDetector.reset();
-    snoozed = false;
-    interruptRequested = false;
+    textDetector.reset();
+    thinkingDetector.reset();
+  }
+
+  pi.on("agent_start", () => {
+    resetDetectors();
+    abortedThisRun = false;
+    // Consume one cooldown run at its start: when the cooldown is exhausted,
+    // detection re-arms. The run that follows the abort is left uninterrupted.
+    skipThisRun = cooldownRunsLeft > 0;
+    if (skipThisRun) cooldownRunsLeft -= 1;
   });
 
   pi.on("tool_call", async (event, ctx) => {
-    if (mode === "off" || snoozed || interruptRequested) return;
+    if (mode === "off" || skipThisRun) return;
+    if (abortedThisRun) {
+      // The turn already aborted (output-loop or the threshold call itself):
+      // block every remaining tool call in the batch so the poisoned turn
+      // produces no toolResult side effects.
+      return { block: true, reason: "Loop guard aborted the run; blocking the poisoned turn's remaining tool calls." };
+    }
     const call: ToolCallRecord = {
       tool: event.toolName,
       input: serializeInput(event.input),
     };
     const detection = toolDetector.record(call);
-    if (detection.kind !== "none") await interrupt(ctx, detection);
+    if (detection.kind !== "none") {
+      // Abort the run (sets abortedThisRun, cooldown, notify), then block this
+      // call so the poisoned turn produces no toolResult side effect.
+      await interrupt(ctx, detection);
+      return {
+        block: true,
+        reason: `Loop guard aborted the run: ${describeLoop(detection)}. Blocking the remaining tool calls of the poisoned turn.`,
+      };
+    }
   });
 
   pi.on("message_update", async (event, ctx) => {
-    if (mode === "off" || snoozed || interruptRequested) return;
+    if (mode === "off" || skipThisRun || abortedThisRun) return;
     const streamEvent = event.assistantMessageEvent;
     if (streamEvent.type !== "text_delta" && streamEvent.type !== "thinking_delta") return;
-    const detection = outputDetector.feed(streamEvent.delta);
+    // Visible text is progress for the tool detector: consecutive-repeat and
+    // cycle counters reset so a run that emits commentary between calls is
+    // never misjudged as looping.
+    if (streamEvent.type === "text_delta" && streamEvent.delta.trim() !== "") {
+      // Visible assistant text is progress: consecutive-repeat/cycle counters
+      // reset so a run that emits commentary between identical calls is never
+      // misjudged as looping (Grok only acts on repetition without progress).
+      toolDetector.reset();
+    }
+    const detector = streamEvent.type === "thinking_delta" ? thinkingDetector : textDetector;
+    const detection = detector.feed(streamEvent.delta);
     if (detection) await interrupt(ctx, detection);
   });
 
   async function interrupt(ctx: ExtensionContext, detection: LoopGuardDetection): Promise<void> {
-    if (interruptRequested) return;
-    interruptRequested = true;
+    if (abortedThisRun) return;
+    abortedThisRun = true;
 
     const explanation = describeLoop(detection);
-    if (!ctx.hasUI || ctx.mode !== "tui") {
-      // No interactive confirmation is possible (print/RPC); abort directly so
-      // a runaway loop cannot hang the run indefinitely.
-      ctx.abort();
-      return;
-    }
-    const approved = await ctx.ui.confirm(
-      "Stop this loop?",
-      `${explanation}\n\nAbort the current agent run? Answering No lets it keep going (loop guard pauses until the next agent run).`,
-    );
-    if (approved) {
-      ctx.abort();
-      ctx.ui.notify(`Aborted agent run: ${explanation}`, "warning");
-    } else {
-      snoozed = true;
-      ctx.ui.notify("Loop guard paused until the next agent run.", "info");
+    ctx.abort();
+    // Leave the next run(s) uninterrupted so a false positive cannot become
+    // repeated user disruption. Detection re-arms after the cooldown.
+    cooldownRunsLeft = effective.cooldownRuns;
+    if (ctx.hasUI) {
+      ctx.ui.notify(
+        `Loop guard aborted the run: ${explanation}. The next ${effective.cooldownRuns} run(s) are left uninterrupted; use /loop-guard off if this was a false positive.`,
+        "warning",
+      );
     }
   }
 }
@@ -159,14 +220,17 @@ function summarizeCall(call: ToolCallRecord): string {
 function formatState(
   mode: LoopGuardMode,
   calls: number,
-  outputChars: number,
+  textChars: number,
+  thinkingChars: number,
   options: Required<LoopGuardOptions>,
+  cooldownRunsLeft: number,
 ): string {
   return [
     `Loop guard: ${mode}`,
     `Tool calls this run: ${calls}`,
-    `Streaming output chars: ${outputChars}`,
-    `Thresholds: repeat=${options.maxRepeatedCalls}, cycle repeats=${options.minCycleRepetitions}, total=${options.maxTotalCalls}, phrase repeats=${options.maxRepeatedPhrases}`,
+    `Streaming output chars (text/thinking): ${textChars}/${thinkingChars}`,
+    `Thresholds: repeat=${options.maxRepeatedCalls}, cycle repeats=${options.minCycleRepetitions}, total=${options.maxTotalCalls} (window ${options.totalWindowCalls}), text phrase repeats=${options.maxRepeatedPhrases}, thinking phrase repeats=${options.maxRepeatedPhrasesThinking}`,
+    `False-positive cooldown: ${cooldownRunsLeft} run(s) left`,
   ].join("\n");
 }
 
