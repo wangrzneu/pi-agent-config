@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import {
@@ -47,9 +49,9 @@ export interface AuthorizationOptions {
   piReadRoots?: string[];
 }
 
-function defaultPiReadRoots(): string[] {
+export function defaultPiReadRoots(homeDir: string = homedir()): string[] {
   const agentDir = getAgentDir();
-  return [
+  const roots = [
     "skills",
     "prompts",
     "themes",
@@ -57,6 +59,13 @@ function defaultPiReadRoots(): string[] {
     "git",
     "packages",
   ].map((name) => join(agentDir, name));
+  // Pi loads global user skills from ~/.agents/skills (docs/sdk.md). They are
+  // runtime guidance like agentDir/skills, not user credentials, so they are
+  // readable by default too. Guarded by existsSync because the directory often
+  // does not exist and an empty root is noise.
+  const userAgentsSkills = join(homeDir, ".agents", "skills");
+  if (existsSync(userAgentsSkills)) roots.push(userAgentsSkills);
+  return roots;
 }
 
 export function registerSandboxExtension(

@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { registerSandboxExtension } from "./index.ts";
+import { defaultPiReadRoots, registerSandboxExtension } from "./index.ts";
 
 function createHarness(runtime, flags = {}, authorizationOptions) {
   const handlers = new Map();
@@ -145,6 +146,17 @@ test("OS temp paths are readable from outside the workspace by default", async (
     input: { path: externalFile },
   }, harness.ctx);
   assert.equal(gate, undefined, "OS temp read should pass the gate by default");
+});
+
+test("defaultPiReadRoots includes ~/.agents/skills when it exists", () => {
+  const fakeHome = join(tmpdir(), `pi-agents-home-${process.pid}-${Date.now()}`);
+  const skills = join(fakeHome, ".agents", "skills");
+  assert.equal(defaultPiReadRoots(fakeHome).some((root) => root === skills), false,
+    "missing ~/.agents/skills is not added",
+  );
+  mkdirSync(skills, { recursive: true });
+  const roots = defaultPiReadRoots(fakeHome);
+  assert.ok(roots.includes(skills), "existing ~/.agents/skills is readable by default");
 });
 
 test("Pi managed skill files are readable without a grant", async () => {

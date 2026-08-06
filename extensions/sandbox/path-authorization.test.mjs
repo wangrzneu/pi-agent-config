@@ -105,6 +105,28 @@ test("Pi managed resource roots are readable without a grant", async () => {
   assert.equal(await authorization.isAllowed(sensitive, workspace), false);
 });
 
+test("~/.agents/skills is readable when listed as a Pi read root", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "pi-agents-ws-"));
+  const agentsHome = await mkdtemp(join(tmpdir(), "pi-agents-home-"));
+  const skills = join(agentsHome, ".agents", "skills");
+  await mkdir(skills, { recursive: true });
+  const skillFile = join(skills, "SKILL.md");
+  await writeFile(skillFile, "guidance");
+
+  const authorization = new SandboxPathAuthorization({
+    allowOsTemp: false,
+    piReadRoots: [skills],
+  });
+  await authorization.reset(workspace);
+
+  assert.equal(await authorization.isAllowed(skillFile, workspace), true);
+  // Sibling paths outside ~/.agents/skills stay blocked.
+  assert.equal(
+    await authorization.isAllowed(join(agentsHome, ".agents", "settings.json"), workspace),
+    false,
+  );
+});
+
 test("read grants are cleared when authorization resets", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-read-reset-"));
   const first = join(root, "first");
