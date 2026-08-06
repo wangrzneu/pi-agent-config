@@ -1,15 +1,22 @@
 /**
- * Detect commands that must run on the host instead of inside the sandbox:
+ * Detect commands that must run on the host instead of inside the sandbox.
  *
- * 1. git commands that touch a remote (push, pull, fetch, clone, ls-remote,
- *    submodule update)
- * 2. gh (GitHub CLI) invocations — every gh subcommand talks to api.github.com
- *    and needs the user's gh auth token / Keychain, which are restricted
- *    inside the sandbox
+ * Built-in always-matched detectors:
+ * - git commands that touch a remote (push, pull, fetch, clone, ls-remote,
+ *   submodule update)
+ * - gh (GitHub CLI) invocations — every gh subcommand talks to api.github.com
+ *   and needs the user's gh auth token / Keychain, which are restricted
+ *   inside the sandbox
  *
- * These operations need network and, for https remotes, Keychain credentials —
- * both restricted inside the sandbox. They are promoted to host execution after
- * explicit user confirmation instead of failing inside the sandbox.
+ * Plus a configurable list of exact command-word prefixes (e.g. `aws`,
+ * `gcloud`, `docker`, `npm`, `ssh`) for tools whose default config points at
+ * `~`-homed credential files. These are matched on the first command word
+ * only, so `aws s3 ls` matches but `echo aws` does not.
+ *
+ * These operations need network and host credentials (Keychain, shell config,
+ * ~/.aws, ...) — both restricted inside the sandbox. They are promoted to
+ * host execution after explicit user confirmation instead of failing inside
+ * the sandbox.
  *
  * Matching segments the whole line by &&/;/| (respecting quotes), so
  * `cd /repo && git push` and `echo hi; git fetch` are detected, not just a
@@ -19,22 +26,68 @@
  * unwrapped once and its quoted content checked recursively, so
  * `bash -c "git push"` works. Literal strings inside plain echo/printf
  * arguments are not treated as commands, which avoids false positives.
+ *
+ * Returns the matched command word (for session-level approval memory) or
+ * `undefined` when the command can stay in the sandbox.
  */
-export function needsHostExecution(command: string): boolean {
+export type HostExecMatch = {
+  /** The stripped first command word that matched (e.g. `aws`, `git`, `gh`). */
+  word: string;
+};
+
+export function matchHostExecCommand(
+  command: string,
+  extraPrefixes: readonly string[] = [],
+): HostExecMatch | undefined {
   for (const segment of splitCommandSegments(command)) {
-    if (isHostExecutedSegment(segment)) return true;
+    const match = matchHostExecSegment(segment, extraPrefixes);
+    if (match !== undefined) return match;
     const inner = unwrapShellC(segment);
-    if (inner !== undefined && needsHostExecution(inner)) return true;
+    if (inner !== undefined) {
+      const match = matchHostExecCommand(inner, extraPrefixes);
+      if (match !== undefined) return match;
+    }
   }
-  return false;
+  return undefined;
 }
 
-function isHostExecutedSegment(segment: string): boolean {
+function matchHostExecSegment(
+  segment: string,
+  extraPrefixes: readonly string[] = [],
+): HostExecMatch | undefined {
   // Commands are often wrapped: `sudo git push`, `nohup gh pr create`,
   // `env GH_TOKEN=x gh auth status`, `command git fetch`. Strip the leading
   // wrapper so the wrapped command is still detected.
   const stripped = stripCommandWrappers(segment);
-  return isRemoteGitSegment(stripped) || isGhSegment(stripped);
+  const gitRemote = matchRemoteGitSegment(stripped);
+  if (gitRemote !== undefined) return gitRemote;
+  const gh = matchGhSegment(stripped);
+  if (gh !== undefined) return gh;
+  return matchExtraPrefixSegment(stripped, extraPrefixes);
+}
+
+function matchRemoteGitSegment(segment: string): HostExecMatch | undefined {
+  return REMOTE_PATTERN.test(segment) ? { word: "git" } : undefined;
+}
+
+function matchGhSegment(segment: string): HostExecMatch | undefined {
+  return GH_PATTERN.test(segment) ? { word: "gh" } : undefined;
+}
+
+/**
+ * Match a configured exact command-word prefix (e.g. `aws`, `gcloud`,
+ * `docker`). Only the first command word is matched, so `echo aws s3` is not
+ * treated as a host command. A bare `bash -c "..."` inner command is handled
+ * by the recursion in {@link matchHostExecCommand}.
+ */
+function matchExtraPrefixSegment(
+  segment: string,
+  extraPrefixes: readonly string[],
+): HostExecMatch | undefined {
+  if (extraPrefixes.length === 0) return undefined;
+  const first = segment.split(/\s+/, 1)[0] ?? "";
+  const word = first.split("/").pop() ?? first;
+  return extraPrefixes.includes(word) ? { word } : undefined;
 }
 
 const GIT_BIN_PREFIX = "(?:[\\w./@+-]+/)*git";

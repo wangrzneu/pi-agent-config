@@ -136,16 +136,28 @@ from the runtime's existing count so `safe.directory` is preserved).
 **Why:** commits through Pi should carry the user's real identity, not git's
 username@hostname guess; the rest of `~/.gitconfig` stays isolated.
 
-### 6. Remote git operations run on the host after approval
+### 6. Credential-needing commands run on the host after approval
 
-`git push|pull|fetch|clone|ls-remote|submodule update` are detected (any
-command segment, quote-aware, incl. `bash -c` wrappers) and, after a
-confirmation dialog, executed with host `BashOperations`. **Why:** https
-remotes need Keychain credentials (`osxkeychain` cannot reach Keychain inside
-the sandbox); direct network is proxy-confined. Pushing is exactly the
-operation where credentials and network must be real — and where user
-approval is required anyway. Local git work (`commit`, `merge`, `status`)
-stays in the sandbox.
+Remote git operations (`push|pull|fetch|clone|ls-remote|submodule update`)
+and `gh` subcommands are always detected (any command segment, quote-aware,
+incl. `bash -c` wrappers); the configurable `hostExec.commands` list adds
+more exact first-command-word matches (default `aws`, `gcloud`, `az`). After
+a confirmation dialog the command is executed with host `BashOperations`, and
+the command word is remembered for the session so repeated occurrences do not
+re-prompt. **Why:** https remotes need Keychain credentials (`osxkeychain`
+cannot reach Keychain inside the sandbox), gh needs the host auth token, and
+cloud CLIs read `~`-homed credential files; direct network is proxy-confined.
+These are exactly the operations where credentials and network must be real —
+and where user approval is required anyway. Local git work (`commit`,
+`merge`, `status`) stays in the sandbox.
+
+Scope guardrails: `npm`/`pnpm`/`yarn` are not in the default list because they
+work sandboxed (cache redirection + `allowedDomains`). `ssh` and `docker`
+are high-privilege escapes (arbitrary remote command execution, host mounts)
+and are deliberately absent from the defaults; a user must list them
+explicitly when they accept running those unsandboxed in a session. Session
+memory is per command word and cleared by session end, so approval cannot
+leak across sessions or across unrelated commands.
 
 ### 7. Behavior preferences live in skills, not interceptors
 
@@ -184,7 +196,7 @@ section; git identity → injected env (Decision 5).
 
 - `git submodule update` is treated as remote; `git bundle` and other
   edge transports are not — revisit if they become common.
-- The `bash -c` unwrap in `needsHostExecution` is intentionally shallow
+- The `bash -c` unwrap in `matchHostExecCommand` is intentionally shallow
   (single level) to avoid treating `echo "git push"` as a command.
 - Linux filesystem patterns are literal paths (no globs); the allowed-domain
   and deny-write lists must stay portable.

@@ -401,6 +401,133 @@ test("remote git and gh operations without approval are rejected instead of fail
   }
 });
 
+test("host execution approval is remembered per command word for the session", async () => {
+  const project = await mkdtemp(join(tmpdir(), "pi-sandbox-hostmem-"));
+  await mkdir(join(project, ".pi"), { recursive: true });
+  // Use a harmless command word as the configurable host-exec prefix, so the
+  // promoted host execution is deterministic and safe in a unit test.
+  await writeFile(join(project, ".pi", "sandbox.json"), JSON.stringify({
+    hostExec: { commands: ["echo"] },
+  }));
+  const fake = createRuntime();
+  const harness = createHarness(fake.runtime);
+  harness.ctx.cwd = project;
+  let confirmCalls = 0;
+  harness.ctx.ui.confirm = async () => {
+    confirmCalls += 1;
+    return true;
+  };
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  const first = await harness.bashTool.execute(
+    "host-mem-1",
+    { command: "echo first" },
+    undefined,
+    undefined,
+    harness.ctx,
+  );
+  assert.equal(confirmCalls, 1, "first occurrence prompts once");
+  assert.match(first.content[0].text, /first/);
+
+  const second = await harness.bashTool.execute(
+    "host-mem-2",
+    { command: "echo second" },
+    undefined,
+    undefined,
+    harness.ctx,
+  );
+  assert.equal(confirmCalls, 1, "same word does not re-prompt");
+  assert.match(second.content[0].text, /second/);
+});
+
+test("host execution memory is keyed per command word, not global", async () => {
+  const project = await mkdtemp(join(tmpdir(), "pi-sandbox-hostword-"));
+  await mkdir(join(project, ".pi"), { recursive: true });
+  await writeFile(join(project, ".pi", "sandbox.json"), JSON.stringify({
+    hostExec: { commands: ["echo", "printf"] },
+  }));
+  const fake = createRuntime();
+  const harness = createHarness(fake.runtime);
+  harness.ctx.cwd = project;
+  let confirmCalls = 0;
+  harness.ctx.ui.confirm = async () => {
+    confirmCalls += 1;
+    return true;
+  };
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  await harness.bashTool.execute(
+    "host-word-1",
+    { command: "echo one" },
+    undefined,
+    undefined,
+    harness.ctx,
+  );
+  await harness.bashTool.execute(
+    "host-word-2",
+    { command: "echo two" },
+    undefined,
+    undefined,
+    harness.ctx,
+  );
+  // A different configured word still prompts even though echo was approved.
+  await harness.bashTool.execute(
+    "host-word-3",
+    { command: "printf three" },
+    undefined,
+    undefined,
+    harness.ctx,
+  );
+  assert.equal(confirmCalls, 2, "echo approved once, printf still prompts");
+});
+
+test("configurable host-exec prefix runs on the host after approval", async () => {
+  const project = await mkdtemp(join(tmpdir(), "pi-sandbox-hostprefix-"));
+  await mkdir(join(project, ".pi"), { recursive: true });
+  await writeFile(join(project, ".pi", "sandbox.json"), JSON.stringify({
+    hostExec: { commands: ["echo"] },
+  }));
+  const fake = createRuntime();
+  const harness = createHarness(fake.runtime);
+  harness.ctx.cwd = project;
+  harness.ctx.ui.confirm = async () => true;
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  const result = await harness.bashTool.execute(
+    "host-prefix",
+    { command: "echo routed-to-host" },
+    undefined,
+    undefined,
+    harness.ctx,
+  );
+  assert.match(result.content[0].text, /routed-to-host/);
+});
+
+test("host execution requires a TUI approval channel for a new word", async () => {
+  const project = await mkdtemp(join(tmpdir(), "pi-sandbox-hostnoxui-"));
+  await mkdir(join(project, ".pi"), { recursive: true });
+  await writeFile(join(project, ".pi", "sandbox.json"), JSON.stringify({
+    hostExec: { commands: ["echo"] },
+  }));
+  const fake = createRuntime();
+  const harness = createHarness(fake.runtime);
+  harness.ctx.cwd = project;
+  harness.ctx.hasUI = false;
+  harness.ctx.mode = "stdio";
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  await assert.rejects(
+    harness.bashTool.execute(
+      "host-noui",
+      { command: "echo hi" },
+      undefined,
+      undefined,
+      harness.ctx,
+    ),
+    /echo operations require interactive approval/,
+  );
+});
+
 test("/sandbox allow-read grants a path for the session", async () => {
   const externalRoot = await mkdtemp(join(tmpdir(), "pi-sandbox-command-"));
   const externalFile = join(externalRoot, "outside.txt");

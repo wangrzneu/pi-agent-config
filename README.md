@@ -65,6 +65,11 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | `docs/sandbox-design.md` | Architecture and design decisions for the sandbox extension |
 | `docs/ssh-tools.md` | SSH tool requirements, behavior, and security boundaries |
 | `docs/security.md` | Security model overview |
+| `docs/claude-code-sandbox.md` | Research: how Claude Code uses sandboxing (primary-source reverse engineering) |
+| `docs/grok-build-sandbox.md` | Research: how Grok Build uses sandboxing (from its open-source Rust CLI) |
+| `docs/sandbox-fuse-gate.md` | Feasibility: FUSE-based ~ interception + authorized access (verdict: macOS no, Linux only if runtime grants become a hard need) |
+| `docs/sandbox-credential-clis.md` | Running credential-needing CLIs (aws/gh/gcloud) in the sandbox: credential masking + TLS termination + SigV4 re-signing |
+| `docs/agent-loop-handling.md` | Research: how Grok Build / Claude Code / Codex / AutoGen handle agent loops (feeds loop-guard optimization) |
 | `docs/exploration.md` | Code exploration guidance |
 | `docs/external-projects.md` | Working with external projects |
 

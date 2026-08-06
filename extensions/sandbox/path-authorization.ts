@@ -28,9 +28,7 @@ export class SandboxPathAuthorization {
     cwd: string,
     options: { allowMissing?: boolean } = {},
   ): Promise<PathGrant> {
-    const expanded = expandHome(stripAtPrefix(rawPath));
-    const absolute = isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
-    const path = await canonicalPotentialPath(absolute);
+    const path = await canonicalAuthorizePath(rawPath, cwd);
     try {
       const metadata = await stat(path);
       return { path, directory: metadata.isDirectory() };
@@ -50,9 +48,7 @@ export class SandboxPathAuthorization {
   }
 
   async isAllowed(rawPath: string, cwd: string): Promise<boolean> {
-    const expanded = expandHome(stripAtPrefix(rawPath));
-    const absolute = isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
-    const path = await canonicalPotentialPath(absolute);
+    const path = await canonicalAuthorizePath(rawPath, cwd);
     if (this.isWithinWorkspace(path)) return true;
     // OS temporary directories are readable by default, matching the sandbox
     // filesystem allowlist that already grants them to shell commands. Their
@@ -76,6 +72,17 @@ export class SandboxPathAuthorization {
   private isWithinWorkspace(path: string): boolean {
     return this.workspace !== "" && isWithin(this.workspace, path);
   }
+}
+
+/**
+ * Resolve a raw tool path against the caller's workspace and canonicalize it
+ * (walking up to the nearest existing ancestor for not-yet-created files), so
+ * inspect() and isAllowed() make the same path decision and cannot diverge.
+ */
+async function canonicalAuthorizePath(rawPath: string, cwd: string): Promise<string> {
+  const expanded = expandHome(stripAtPrefix(rawPath));
+  const absolute = isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+  return canonicalPotentialPath(absolute);
 }
 
 function isWithin(parent: string, child: string): boolean {

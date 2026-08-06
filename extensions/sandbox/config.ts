@@ -7,6 +7,13 @@ import { errorMessage } from "./util.ts";
 
 export interface SandboxConfig extends SandboxRuntimeConfig {
   enabled: boolean;
+  /**
+   * Commands that always run on the host (after session-level approval) because
+   * their default configuration lives in `~`-homed credential files that the
+   * sandbox denies. Matched by exact first command word. Remote git and `gh`
+   * are always matched by the built-in detectors and do not need to be listed.
+   */
+  hostExec?: { commands?: string[] };
 }
 
 export interface LoadedSandboxConfig {
@@ -121,6 +128,17 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
   credentials: {
     envVars: SENSITIVE_ENV_VARS.map((name) => ({ name, mode: "deny" as const })),
   },
+  hostExec: {
+    // Only cloud-CLI tools whose credentials live in `~` files and whose
+    // operations are network-bound are promoted to the host by default:
+    // - npm/pnpm/yarn are intentionally absent: they have cache/temp
+    //   redirections in the sandbox (codingCacheEnvironment) and their registry
+    //   traffic is in `allowedDomains`, so plain installs work sandboxed.
+    // - ssh/docker are intentionally absent: they are high-privilege escapes
+    //   (arbitrary remote command execution / host mounts). They are promoted
+    //   only when a user explicitly lists them in sandbox.json.
+    commands: ["aws", "gcloud", "az"],
+  },
 };
 
 const RUNTIME_PASSTHROUGH_KEYS = [
@@ -142,7 +160,7 @@ export function mergeSandboxConfig(
   mergeSection(merged, overrides, "filesystem");
   mergeSection(merged, overrides, "credentials");
 
-  for (const key of RUNTIME_PASSTHROUGH_KEYS) {
+  for (const key of [...RUNTIME_PASSTHROUGH_KEYS, "hostExec"] as const) {
     if (overrides[key] !== undefined) {
       (merged as unknown as Record<string, unknown>)[key] = structuredClone(overrides[key]);
     }

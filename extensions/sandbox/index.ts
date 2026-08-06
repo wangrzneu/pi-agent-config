@@ -11,7 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { loadSandboxConfig, type LoadedSandboxConfig } from "./config.ts";
-import { needsHostExecution } from "./host-escape.ts";
+import { matchHostExecCommand } from "./host-escape.ts";
 import { loadGitIdentity, type GitIdentity } from "./git-identity.ts";
 import {
   createSandboxedBashOperations,
@@ -73,6 +73,10 @@ export function registerSandboxExtension(
   let initialized = false;
   let gitIdentity: GitIdentity | undefined;
   let state: SandboxState = { mode: "starting", reason: "waiting for session start" };
+  // Session-level host-execution approval memory: once the user approves a
+  // host execution for a command word (e.g. `aws`), later `aws ...` commands in
+  // the same session run on the host without re-prompting.
+  const approvedHostExecWords = new Set<string>();
   const operations = createSandboxedBashOperations(runtime, tracker, () => {
     const filesystem = state.loaded?.config.filesystem;
     if (!filesystem) return undefined;
@@ -109,21 +113,28 @@ export function registerSandboxExtension(
       }
 
       const command = String(params.command ?? "");
-      // Remote git operations (push, pull, fetch, clone, ls-remote) and gh
-      // (GitHub CLI) subcommands need network and host credentials (Keychain /
-      // gh auth token) — both restricted inside the sandbox. Confirm and run
-      // them on the host instead.
-      if (state.mode === "sandboxed" && needsHostExecution(command)) {
-        if (!ctx.hasUI || ctx.mode !== "tui") {
+      // Commands that need host credentials/network (remote git push/pull,
+      // gh, and configurable tools like aws/gcloud/docker whose credentials
+      // live in ~-homed files the sandbox denies) run on the host after
+      // approval. The approval is remembered per command word for the session.
+      const hostPrefixes = state.loaded?.config.hostExec?.commands ?? [];
+      const hostMatch = state.mode === "sandboxed"
+        ? matchHostExecCommand(command, hostPrefixes)
+        : undefined;
+      if (hostMatch !== undefined) {
+        const { word } = hostMatch;
+        const preApproved = approvedHostExecWords.has(word);
+        if (!preApproved && (!ctx.hasUI || ctx.mode !== "tui")) {
           throw new Error(
-            "Remote git and gh operations require interactive approval; run it in your own terminal or approve in the Pi TUI.",
+            `${word} operations require interactive approval; run it in your own terminal or approve in the Pi TUI.`,
           );
         }
-        const approved = await ctx.ui.confirm(
+        const approved = preApproved || await ctx.ui.confirm(
           "Run this operation on the host?",
-          "Keychain/gh credentials and direct network are unavailable inside the sandbox, so remote git and gh operations are executed on the host after approval.\n\n" + command,
+          `${word} needs host credentials and direct network that the sandbox denies. Run it on the host (approved once per session)?\n\n` + command,
         );
         if (!approved) throw new Error("Operation was not approved.");
+        approvedHostExecWords.add(word);
         const hostTool = createBashToolDefinition(ctx.cwd, { operations: createLocalBashOperations() });
         return hostTool.execute(id, params, signal, onUpdate, ctx);
       }
@@ -245,29 +256,21 @@ export function registerSandboxExtension(
         await ctx.reload();
         return;
       }
-      if (trimmed.toLowerCase().startsWith("allow-read ")) {
-        const rawPath = unquote(trimmed.slice("allow-read ".length).trim());
-        const paths = await authorizePaths(
-          readAuthorization,
-          [rawPath],
-          "Requested with /sandbox allow-read",
-          "read",
-          ctx,
-        );
-        ctx.ui.notify(`Authorized for this session:\n${paths.join("\n")}`, "info");
-        return;
-      }
-      if (trimmed.toLowerCase().startsWith("allow-write ")) {
-        const rawPath = unquote(trimmed.slice("allow-write ".length).trim());
-        const paths = await authorizePaths(
-          writeAuthorization,
-          [rawPath],
-          "Requested with /sandbox allow-write",
-          "write",
-          ctx,
-        );
-        ctx.ui.notify(`Authorized for this session:\n${paths.join("\n")}`, "info");
-        return;
+      const ALLOW_PREFIXES: Record<string, PathAccess> = { "allow-read": "read", "allow-write": "write" };
+      for (const [prefix, access] of Object.entries(ALLOW_PREFIXES)) {
+        if (trimmed.toLowerCase().startsWith(`${prefix} `)) {
+          const rawPath = unquote(trimmed.slice(prefix.length + 1).trim());
+          const auth = access === "read" ? readAuthorization : writeAuthorization;
+          const paths = await authorizePaths(
+            auth,
+            [rawPath],
+            `Requested with /sandbox ${prefix}`,
+            access,
+            ctx,
+          );
+          ctx.ui.notify(`Authorized for this session:\n${paths.join("\n")}`, "info");
+          return;
+        }
       }
       if (trimmed.toLowerCase() === "revoke-read") {
         readAuthorization.revoke();
@@ -280,7 +283,7 @@ export function registerSandboxExtension(
         return;
       }
       ctx.ui.notify(
-        formatState(state, readAuthorization.paths(), writeAuthorization.paths()),
+        formatState(state, readAuthorization.paths(), writeAuthorization.paths(), approvedHostExecWords),
         state.mode === "blocked" ? "error" : "info",
       );
     },
@@ -301,6 +304,7 @@ function formatState(
   state: SandboxState,
   readGrants: string[] = [],
   writeGrants: string[] = [],
+  approvedHostExecWords: ReadonlySet<string> = new Set(),
 ): string {
   const lines = [
     `Sandbox: ${state.mode}`,
@@ -325,6 +329,10 @@ function formatState(
     `  Baseline allow write: ${config.filesystem.allowWrite.join(", ") || "(none)"}`,
     `  Session write grants: ${writeGrants.join(", ") || "(none)"}`,
     `  Deny write: ${config.filesystem.denyWrite.join(", ") || "(none)"}`,
+    "",
+    "Host execution (after approval):",
+    `  Extra command prefixes: ${config.hostExec?.commands?.join(", ") || "(none)"}`,
+    `  Approved this session: ${[...approvedHostExecWords].join(", ") || "(none)"}`,
   );
   if (loaded.warnings.length > 0) {
     lines.push("", "Warnings:", ...loaded.warnings.map((warning) => `  ${warning}`));

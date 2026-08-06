@@ -2,7 +2,7 @@
 
 The sandbox extension replaces Pi's built-in `bash` execution backend and intercepts user `!` commands. It uses `@anthropic-ai/sandbox-runtime` to enforce filesystem and network policy with macOS Seatbelt (`sandbox-exec`) or Linux bubblewrap.
 
-For the architecture and the reasoning behind each behavior, see [`sandbox-design.md`](sandbox-design.md).
+For the architecture and the reasoning behind each behavior, see [`sandbox-design.md`](sandbox-design.md). For a feasibility analysis of replacing the OS-denied `~` access with a FUSE interception gate (authorize-then-allow), see [`sandbox-fuse-gate.md`](sandbox-fuse-gate.md).
 
 ## Design goals
 
@@ -87,6 +87,9 @@ Example `.pi/sandbox.json`:
       { "name": "OPENAI_API_KEY", "mode": "deny" },
       { "name": "ANTHROPIC_API_KEY", "mode": "deny" }
     ]
+  },
+  "hostExec": {
+    "commands": ["aws", "gcloud", "az"]
   }
 }
 ```
@@ -107,9 +110,27 @@ The rest of the global configuration (`~/.config/git`, credential helpers, URL r
 
 Credentials for `git push` remain governed by the `credentials` section.
 
-### Remote git and gh operations run on the host
+### Host execution for commands that need real credentials
 
-Remote git operations cannot fully work inside the sandbox: the default `osxkeychain` credential helper cannot reach the user's Keychain (https remotes fail with `could not read Username ... Device not configured`), and direct network is channeled through the sandbox proxy. When a remote git command is detected (`push`, `pull`, `fetch`, `clone`, `ls-remote`) — or a `gh` (GitHub CLI) subcommand, which always talks to api.github.com and needs the user's gh auth token — the extension asks for confirmation and runs it **on the host**, where Keychain, git identity, gh auth, and network are available. Commands wrapped by `sudo`, `nohup`, `env KEY=VAL`, `command`, or `exec` are detected too (`sudo gh pr create`, `sudo git push`). Operations therefore keep working and stay approval-gated; declines fail closed.
+Some commands cannot work inside the sandbox because their credentials and network live outside it:
+
+- Remote git operations (`push`, `pull`, `fetch`, `clone`, `ls-remote`): the default `osxkeychain` helper cannot reach the user's Keychain (https remotes fail with `could not read Username ... Device not configured`).
+- `gh` (GitHub CLI) subcommands: they always talk to api.github.com and need the user's gh auth token.
+- Cloud CLIs whose credentials live in `~` files and whose operations are entirely network-bound: `aws`, `gcloud`, `az`.
+
+When such a command is detected, the extension asks for confirmation and runs it **on the host**, where Keychain, git identity, gh auth, and network are available. Commands wrapped by `sudo`, `nohup`, `env KEY=VAL`, `command`, or `exec` are detected too (`sudo gh pr create`, `sudo git push`). Declines fail closed.
+
+The approval is remembered **per command word for the current session**: after approving `aws`, later `aws ...` commands in the same session run on the host without re-prompting (each command word — `git`, `gh`, `aws`, ... — is remembered separately). Non-interactive sessions reject host-execution commands unless the word was already approved.
+
+Configure the extra host-executed command words with `hostExec.commands` (matched on the exact first command word):
+
+```json
+{
+  "hostExec": { "commands": ["aws", "gcloud", "az"] }
+}
+```
+
+The default list is `["aws", "gcloud", "az"]` (remote git and `gh` are always detected and need no listing). `npm`/`pnpm`/`yarn` are intentionally absent — they work sandboxed via cache redirection and `allowedDomains`. `ssh` and `docker` are intentionally absent because they are high-privilege escapes (arbitrary remote command execution, host mounts): list them explicitly only when you accept running them unsandboxed in the session.
 
 ### Registry and auth configuration
 

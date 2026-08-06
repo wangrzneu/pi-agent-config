@@ -62,6 +62,30 @@ test("trusted project config takes precedence over global config", async () => {
   assert.deepEqual(loaded.warnings, []);
 });
 
+test("hostExec defaults to the credential-needing CLI list", () => {
+  const commands = DEFAULT_SANDBOX_CONFIG.hostExec?.commands ?? [];
+  assert.ok(commands.includes("aws"));
+  assert.ok(commands.includes("gcloud"));
+  assert.ok(commands.includes("az"));
+  assert.ok(commands.includes("gh") === false); // gh is a built-in detector
+});
+
+test("hostExec default excludes sandbox-friendly and high-privilege commands", () => {
+  const commands = DEFAULT_SANDBOX_CONFIG.hostExec?.commands ?? [];
+  // Package managers work sandboxed via cache redirection + allowedDomains.
+  assert.equal(commands.includes("npm"), false);
+  assert.equal(commands.includes("pnpm"), false);
+  assert.equal(commands.includes("yarn"), false);
+  // High-privilege escapes stay opt-in.
+  assert.equal(commands.includes("ssh"), false);
+  assert.equal(commands.includes("docker"), false);
+});
+
+test("hostExec overrides replace the command list wholesale", () => {
+  const config = mergeSandboxConfig(DEFAULT_SANDBOX_CONFIG, { hostExec: { commands: ["az"] } });
+  assert.deepEqual(config.hostExec?.commands, ["az"]);
+});
+
 test("untrusted project config is ignored and reported", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-sandbox-untrusted-"));
   const agentDir = join(root, "agent");
