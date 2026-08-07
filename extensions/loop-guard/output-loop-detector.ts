@@ -16,6 +16,12 @@
  * - Phrases shorter than `minPhraseLength` or without at least two letters
  *   (e.g. "=====", "111 222", "a") are ignored — they are not meaningful
  *   repetition signal.
+ * - Only prose clauses count: a segment must be bounded by clause-level
+ *   punctuation (sentence finals, commas, line breaks), contain no
+ *   structural punctuation (quotes, backticks, parens, brackets, braces),
+ *   and — unless CJK — span at least two words. Code fragments and bare
+ *   identifiers (e.g. `omitempty`, `ContentItem`, `err := f()`) are not
+ *   repetition signal.
  *
  * Callers decide the action on detection (abort vs prompt) — this module only
  * reports that a confident repetition was seen.
@@ -106,21 +112,65 @@ export class OutputLoopDetector {
 
 /**
  * Split text into exact-repeatable units: sentence-like segments split on
- * sentence punctuation, line breaks, and common delimiters (CJK and Latin).
- * Whitespace is normalized so streaming token boundaries do not break a
- * phrase. Segments without at least two letters (Latin or CJK) are dropped —
- * they are code/separator noise, not repetition signal.
+ * clause-level punctuation (sentence finals, commas, line breaks). Whitespace
+ * is normalized so streaming token boundaries do not break a phrase.
+ *
+ * Deliberately conservative about code — a phrase is repetition signal only
+ * if it is a prose clause:
+ * - Segments without at least two letters (Latin or CJK) are dropped — they
+ *   are code/separator noise, not repetition signal.
+ * - Segments containing structural punctuation (quotes, backticks, parens,
+ *   brackets) are code fragments, not clauses: a Go struct tag like
+ *   `json:"return_last_frame,omitempty"` stays bound to its field line and
+ *   never sheds identical `omitempty` fragments across fields; call-site
+ *   prefixes and `return ""` tails are filtered the same way.
+ * - Bare single-token ASCII phrases (identifiers such as `ContentItem`,
+ *   `default_timeout`) are dropped, while pure CJK phrases count as single
+ *   tokens — the script has no word spaces, so a stuck `请执行第一步操作。`
+ *   loop must still fire.
  */
 export function extractPhrases(text: string, minLength = 4): string[] {
-  const parts = text.split(/[。．！？!?；;，,·…\n\r（）()\[\]「」.]+/);
+  const parts = text.split(/[。．！？!?；;，,·…\n\r.]+/);
   const phrases: string[] = [];
   for (const part of parts) {
     const normalized = part.replace(/\s+/g, " ").trim();
     if (normalized.length < minLength) continue;
     if (letterCount(normalized) < 2) continue;
+    if (!isProseClause(normalized)) continue;
+    if (!isRepeatSignal(normalized)) continue;
     phrases.push(normalized);
   }
   return phrases;
+}
+
+/**
+ * Structural punctuation marks a segment as code or quoted text, not a
+ * repeatable prose clause: quotes in all flavors (plus backtick) and every
+ * bracket form are exactly what struct tags, JSON, call sites, and string
+ * literals are built from. Non-ASCII quotes are included so quoted speech
+ * behaves the same way; apostrophes (`'`, `’`) are deliberately NOT included
+ * so English contractions keep working.
+ */
+const STRUCTURAL_PUNCTUATION = /["“”‘’`()\[\]（）{}【】「」『』]/u;
+
+function isProseClause(phrase: string): boolean {
+  return !STRUCTURAL_PUNCTUATION.test(phrase);
+}
+
+/**
+ * A phrase is repetition signal only if it is more than a bare ASCII
+ * identifier. Pure-ASCII phrases must span at least two whitespace-separated
+ * tokens (sentences/clauses); CJK phrases are valid single tokens because the
+ * script does not use word spaces. This filters repeated identifiers and
+ * struct-tag fragments that code listings legitimately repeat.
+ */
+function isRepeatSignal(phrase: string): boolean {
+  if (hasCJK(phrase)) return true;
+  return phrase.split(/\s+/).length >= 2;
+}
+
+function hasCJK(text: string): boolean {
+  return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text);
 }
 
 function letterCount(text: string): number {

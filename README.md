@@ -189,7 +189,7 @@ Classification results are not added to the session or main model context.
 
 ### 🔁 Loop guard
 
-Enabled by default. While an agent run is active, the loop guard tracks tool calls **and the model's
+Disabled by default. While an agent run is active, the loop guard tracks tool calls **and the model's
 streamed output** and detects stuck loops:
 
 - the same tool call repeated in a row (5+, configurable);
@@ -199,8 +199,13 @@ streamed output** and detects stuck loops:
   model that is verbally stuck repeating an intent ("now run lldb…", "now run lldb…") without ever
   making the tool call.
 
-On detection it asks whether to abort the run (and aborts directly in print/RPC mode). Use
+On detection it asks whether to abort the run (and aborts directly in print/RPC mode). Opt in per
+session with `/loop-guard on` (or permanently via the extension's `defaultMode` setting). Use
 `/loop-guard` to inspect state, or `off|on|reset` to disable, re-enable, or clear counters.
+
+It is off by default because the phrase-repetition heuristic is string-based and can false-positive
+on legitimate code (e.g. several identical `return err` lines in one window); a fix that is safe to
+enable out of the box needs linguistic judgment rather than string matching.
 
 ### 📖 Markdown viewer
 

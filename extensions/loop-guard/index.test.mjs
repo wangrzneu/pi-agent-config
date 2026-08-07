@@ -49,6 +49,8 @@ function installed() {
     analyzeEveryChars: 1,
     minPhraseLength: 4,
     cooldownRuns: 1,
+    // The detection-logic tests below exercise the armed detector.
+    defaultMode: "on",
   });
   return pi;
 }
@@ -104,6 +106,7 @@ test("cooldownRuns: 2 skips two runs after an abort", async () => {
     minCycleRepetitions: 100,
     maxRepeatedPhrases: 100,
     cooldownRuns: 2,
+    defaultMode: "on",
   });
   const ctx = fakeCtx();
   pi.handlers.get("agent_start")({}, ctx);
@@ -200,16 +203,26 @@ test("/loop-guard off disables detection", async () => {
   assert.equal(ctx.aborted, false);
 });
 
-test("default export is enabled out of the box with no configuration", async () => {
+test("default export is off out of the box; /loop-guard on arms it", async () => {
   const pi = fakePi();
   const ctx = fakeCtx();
   loopGuardExtension(pi);
   assert.ok(pi.commands.has("loop-guard"), "loop-guard command must be registered");
+
+  // Disabled by default: repeated identical calls must NOT abort.
   pi.handlers.get("agent_start")({}, ctx);
   for (let i = 0; i < DEFAULT_LOOP_OPTIONS.maxRepeatedCalls; i += 1) {
     await toolCall(pi, ctx, "bash", { command: "git status" }, `z${i}`);
   }
-  assert.equal(ctx.aborted, true, "loop guard must interrupt by default without any opt-in");
+  assert.equal(ctx.aborted, false, "loop guard must be off without any opt-in");
+
+  // /loop-guard on arms detection for the next run.
+  await pi.commands.get("loop-guard").handler("on", ctx);
+  pi.handlers.get("agent_start")({}, ctx);
+  for (let i = 0; i < DEFAULT_LOOP_OPTIONS.maxRepeatedCalls; i += 1) {
+    await toolCall(pi, ctx, "bash", { command: "git status" }, `y${i}`);
+  }
+  assert.equal(ctx.aborted, true, "/loop-guard on must arm detection");
 });
 
 function messageUpdate(pi, ctx, delta, streamType = "text_delta") {

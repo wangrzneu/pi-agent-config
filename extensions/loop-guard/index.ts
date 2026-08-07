@@ -27,6 +27,14 @@ export interface LoopGuardOptions extends LoopDetectOptions, OutputLoopOptions {
    * re-arms on the run after that.
    */
   cooldownRuns?: number;
+  /**
+   * Whether detection runs on startup. Defaults to "off": the phrase/tool
+   * heuristics can false-positive on legitimate code (e.g. five identical
+   * `return err` lines in one window), and a fix that is reliable enough to
+   * be on by default needs linguistic judgment, not string heuristics. Opt
+   * back in per session with `/loop-guard on`, or permanently via settings.
+   */
+  defaultMode?: "on" | "off";
 }
 
 /**
@@ -69,7 +77,7 @@ export function registerLoopGuardExtension(
     cooldownRuns: 1,
     ...options,
   };
-  let mode: LoopGuardMode = "on";
+  let mode: LoopGuardMode = options.defaultMode ?? "off";
   /** At most one abort per agent run. */
   let abortedThisRun = false;
   /** Runs left to skip detection for after a false-positive abort. */
