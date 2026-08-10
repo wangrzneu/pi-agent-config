@@ -14,7 +14,7 @@ The defaults are intended for everyday, iterative coding:
 - The per-user OS temporary directory (`TMPDIR`/`/var/folders/...` on macOS, `/tmp` on Linux) is readable and writable so compilers, runtimes, and git/xcrun can create transient cache files. The runtime also redirects the child's `TMPDIR` to its own managed scratch path regardless of configuration.
 - On macOS the sandbox grants the system trustd service (`enableWeakerNetworkIsolation`) so tools that verify TLS certificates through the system trust store work: newer pip (via `truststore`), Go modules, `gh`, `gcloud`, and similar. Go's module and checksum (`GOMODCACHE`, `GOPATH`/sumdb) caches are redirected into the sandbox cache.
 - npm, pnpm, Yarn, Python, Go, Cargo, Gradle, NuGet, and Deno caches are redirected to a process-scoped temporary cache so dependency installation works without granting writes across the home directory.
-- Common source hosts and package registries are reachable; other destinations are blocked.
+- Common source hosts and package registries are reachable. An unlisted domain pauses the connection and requests session authorization; explicit deny rules remain blocked.
 - Local port binding and loopback connections are allowed for test servers and development servers.
 - Common API and package tokens are removed from the child environment.
 - Foreground builds, tests, and migrations have no implicit timeout. Output streams continuously through Pi's bounded bash output handling, and an explicit `timeout` remains available.
@@ -52,6 +52,18 @@ Files under the OS temporary directory (`/tmp`, `/private/tmp`, the per-user `TM
 
 Pi's own managed resources are readable by default: the agent directory's `skills`, `prompts`, `themes`, `extensions`, and installed packages (`git/`, `packages/`). These are runtime guidance and code, not user credentials. The agent-directory root itself (for example `settings.json`) is not in that default set.
 
+## Network authorization
+
+When a sandboxed command connects to a hostname that does not match `network.allowedDomains`, the runtime pauses that connection and asks the user whether to allow the exact hostname. An approval:
+
+- applies to that exact hostname on any port;
+- is remembered only for the current session;
+- affects later connections from already-running or future sandboxed commands;
+- is listed under `Session domain grants` in `/sandbox`;
+- can be cleared with `/sandbox revoke-network` (existing open connections are not terminated).
+
+A decline blocks the connection. Without an interactive approval channel, unlisted hosts are denied. Entries in `network.deniedDomains` always take precedence and are never offered for approval. Set `network.strictAllowlist` to `true` to disable prompts and hard-block every unlisted hostname.
+
 The extension does not parse arbitrary shell syntax and prompt retroactively. A shell command that needs an unapproved external path fails with an OS permission error; authorize the path first and then run the command. Configured `denyWrite` patterns still take precedence over a session write grant.
 
 ## Configuration
@@ -77,6 +89,7 @@ Example `.pi/sandbox.json`:
       "api.example.test"
     ],
     "deniedDomains": [],
+    "strictAllowlist": false,
     "allowLocalBinding": true
   },
   "filesystem": {

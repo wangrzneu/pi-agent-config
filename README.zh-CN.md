@@ -141,6 +141,8 @@ pi
 - 🔐 **工作区外的用户文件**必须通过 `sandbox_authorize_read`、`sandbox_authorize_write` 或
   `/sandbox allow-read|allow-write <路径>` 获得当前 session 的明确授权；Pi 的直接读取、搜索、
   目录、写入和编辑工具也使用相同权限门。
+- 🌐 **未列入白名单的网络域名**会暂停连接并请求授权。精确主机名授权持续到当前 session，
+  可用 `/sandbox revoke-network` 清除；显式拒绝规则和 `strictAllowlist` 仍会硬性阻止访问。
 - ⏱️ 前台命令没有隐式超时，并支持流式输出和进程组取消，适合耗时较长的构建与测试。
 - ⌨️ 使用 `/sandbox` 查看生效策略，修改配置后执行 `/sandbox reload`；只有明确传入
   `--no-sandbox` 才会绕过沙箱。
@@ -253,7 +255,7 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
   `ssh_enable` 会直接恢复工具而不重新弹框；作业状态和取消工具只为已跟踪作业保留。`/ssh-tools
   off|reset` 会撤销授权。该过程不发起额外模型分类请求。
 - Sandbox 不会增加模型请求，也不会向会话写入持久内容；除沙箱化 bash 外，只暴露精简的读写
-  授权工具。
+  授权工具。未列入白名单的域名通过直接用户确认授权，不会触发额外模型请求。
 
 ## 🎯 设计原则
 

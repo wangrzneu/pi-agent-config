@@ -50,7 +50,7 @@ coding") and long-running work:
 │  extensions/sandbox/index.ts                                 │
 │    • state machine (starting/sandboxed/bypass/blocked)       │
 │    • tool_call gate → SandboxPathAuthorization               │
-│    • /sandbox commands, sandbox_authorize_* tools            │
+│    • /sandbox commands, filesystem + network approvals       │
 │    • host-side git identity loader                           │
 │    • remote-git host-escape guard                            │
 └─────────────────────────────────────────────────────────────┘
@@ -83,6 +83,17 @@ coding") and long-running work:
 4. `sandbox_authorize_read|write` inspects up to 8 paths, prompts the user,
    and stores grants in process memory only. Grants are cleared on reload,
    session replacement, and shutdown.
+
+### Authorization flow (network)
+
+1. The ASRT proxy checks `deniedDomains`, then `allowedDomains`.
+2. An explicitly denied host is blocked. An allowed host connects immediately.
+3. For an unlisted host, ASRT invokes the extension's `SandboxAskCallback` and
+   holds the connection while Pi asks the user.
+4. Approval is remembered by exact hostname (all ports) in process memory for
+   the session. Declines and non-interactive sessions fail closed.
+5. `network.strictAllowlist: true` disables the callback path, preserving a
+   deterministic hard allowlist for managed or high-assurance configurations.
 
 ### Graceful shutdown
 
@@ -159,14 +170,25 @@ explicitly when they accept running those unsandboxed in a session. Session
 memory is per command word and cleared by session end, so approval cannot
 leak across sessions or across unrelated commands.
 
-### 7. Behavior preferences live in skills, not interceptors
+### 7. Unlisted network domains use session authorization
+
+ASRT receives a `SandboxAskCallback`, so a connection to a host absent from the
+allowlist pauses for explicit approval instead of failing first and requiring a
+configuration edit. Approved exact hostnames are remembered in memory for the
+session and can be revoked with `/sandbox revoke-network`. Explicit
+`deniedDomains` and `strictAllowlist` remain hard policy boundaries. **Why:**
+package and build tooling often discovers secondary download hosts at runtime;
+a session grant preserves least privilege without turning ordinary dependency
+work into repeated config edits.
+
+### 8. Behavior preferences live in skills, not interceptors
 
 The Python-venv rule and other "should do" guidance live in
 `skills/pi-workflow/SKILL.md`. **Why:** they are preferences with legitimate
 exceptions, not security boundaries; hard-coding them as blocks created false
 positives (interactive `python3 -c`, venv creation itself).
 
-### 8. Experimental third-party runtime
+### 9. Experimental third-party runtime
 
 `@anthropic-ai/sandbox-runtime` is experimental upstream software; the
 extension documents its limits (no VM/container isolation, writable project,
@@ -177,7 +199,7 @@ trustd grant on macOS) rather than pretending otherwise.
 | State | Meaning | bash/`!` behavior | Direct tools |
 | --- | --- | --- | --- |
 | `starting` | session not initialized yet | blocked | gated (workspace-only) |
-| `sandboxed` | runtime initialized | sandboxed | gated (workspace + grants) |
+| `sandboxed` | runtime initialized | sandboxed; unlisted domains request approval | gated (workspace + grants) |
 | `bypass` | `--no-sandbox` / `enabled:false` | plain host shell | **not gated** |
 | `blocked` | init failed | blocked | gated (workspace-only) |
 

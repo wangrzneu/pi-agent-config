@@ -85,14 +85,16 @@ function createHarness(runtime, flags = {}, authorizationOptions) {
 
 function createRuntime({ initializeError } = {}) {
   let resets = 0;
+  let networkAsk;
   const commandConfigs = [];
   return {
     runtime: {
       isSupportedPlatform() {
         return true;
       },
-      async initialize() {
+      async initialize(_config, ask) {
         if (initializeError) throw initializeError;
+        networkAsk = ask;
       },
       async wrapWithSandbox(command, _shell, config) {
         commandConfigs.push(config);
@@ -109,8 +111,46 @@ function createRuntime({ initializeError } = {}) {
     commandConfigs() {
       return commandConfigs;
     },
+    askNetwork(params) {
+      assert.ok(networkAsk, "network authorization callback was registered");
+      return networkAsk(params);
+    },
   };
 }
+
+test("unlisted network domains request approval once per session", async () => {
+  const fake = createRuntime();
+  const harness = createHarness(fake.runtime);
+  const confirmations = [];
+  harness.ctx.ui.confirm = async (title, message) => {
+    confirmations.push({ title, message });
+    return true;
+  };
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  assert.equal(await fake.askNetwork({ host: "Downloads.Example.COM.", port: 443 }), true);
+  assert.equal(await fake.askNetwork({ host: "downloads.example.com", port: 8443 }), true);
+  assert.equal(confirmations.length, 1, "an approved exact domain is remembered across ports");
+  assert.match(confirmations[0].title, /network access/i);
+  assert.match(confirmations[0].message, /downloads\.example\.com:443/);
+  assert.match(confirmations[0].message, /rest of this session/);
+
+  await harness.commands.get("sandbox")("", harness.ctx);
+  assert.match(harness.notifications.at(-1).message, /Session domain grants: downloads\.example\.com/);
+
+  await harness.commands.get("sandbox")("revoke-network", harness.ctx);
+  assert.equal(await fake.askNetwork({ host: "downloads.example.com", port: 443 }), true);
+  assert.equal(confirmations.length, 2, "revoking network grants causes the next access to prompt");
+});
+
+test("unlisted network domains are denied without an interactive approval channel", async () => {
+  const fake = createRuntime();
+  const harness = createHarness(fake.runtime);
+  harness.ctx.hasUI = false;
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  assert.equal(await fake.askNetwork({ host: "blocked.example.com", port: 443 }), false);
+});
 
 test("initialized sandbox executes bash with Pi session environment", async () => {
   const fake = createRuntime();

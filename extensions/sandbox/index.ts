@@ -2,7 +2,11 @@ import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { SandboxManager, type SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
+import {
+  SandboxManager,
+  type SandboxAskCallback,
+  type SandboxRuntimeConfig,
+} from "@anthropic-ai/sandbox-runtime";
 import {
   CONFIG_DIR_NAME,
   createBashToolDefinition,
@@ -35,7 +39,7 @@ interface SandboxState {
 }
 
 interface SandboxRuntime extends SandboxCommandRuntime {
-  initialize(config: SandboxRuntimeConfig): Promise<void>;
+  initialize(config: SandboxRuntimeConfig, ask?: SandboxAskCallback): Promise<void>;
   isSupportedPlatform(): boolean;
   reset(): Promise<void>;
 }
@@ -82,10 +86,11 @@ export function registerSandboxExtension(
   let initialized = false;
   let gitIdentity: GitIdentity | undefined;
   let state: SandboxState = { mode: "starting", reason: "waiting for session start" };
-  // Session-level host-execution approval memory: once the user approves a
-  // host execution for a command word (e.g. `aws`), later `aws ...` commands in
-  // the same session run on the host without re-prompting.
+  // Session-level approval memory. Host execution is keyed by command word;
+  // network access is keyed by exact hostname (and applies to every port).
   const approvedHostExecWords = new Set<string>();
+  const approvedNetworkDomains = new Set<string>();
+  const pendingNetworkApprovals = new Map<string, Promise<boolean>>();
   const operations = createSandboxedBashOperations(runtime, tracker, () => {
     const filesystem = state.loaded?.config.filesystem;
     if (!filesystem) return undefined;
@@ -184,6 +189,8 @@ export function registerSandboxExtension(
   pi.on("session_start", async (_event, ctx) => {
     state = { mode: "starting", reason: "initializing" };
     initialized = false;
+    approvedNetworkDomains.clear();
+    pendingNetworkApprovals.clear();
     // Read the host git identity so sandboxed git commits inherit the user's
     // ~/.gitconfig identity (home reads are denied inside the sandbox).
     gitIdentity = loadGitIdentity();
@@ -228,7 +235,16 @@ export function registerSandboxExtension(
     try {
       await ensureSandboxTempRoot();
       const { enabled: _enabled, ...runtimeConfig } = loaded.config;
-      await runtime.initialize(runtimeConfig);
+      await runtime.initialize(
+        runtimeConfig,
+        ({ host, port }) => authorizeNetworkDomain(
+          host,
+          port,
+          approvedNetworkDomains,
+          pendingNetworkApprovals,
+          ctx,
+        ),
+      );
       initialized = true;
       state = { mode: "sandboxed", reason: "active", loaded };
       setStatus(ctx, state);
@@ -249,6 +265,8 @@ export function registerSandboxExtension(
     await tracker.stopAll();
     readAuthorization.revoke();
     writeAuthorization.revoke();
+    approvedNetworkDomains.clear();
+    pendingNetworkApprovals.clear();
     if (initialized) await runtime.reset().catch(() => undefined);
     initialized = false;
     ctx.ui.setStatus(STATUS_KEY, undefined);
@@ -258,7 +276,7 @@ export function registerSandboxExtension(
   });
 
   pi.registerCommand("sandbox", {
-    description: "Show sandbox state, or use /sandbox allow-read|allow-write|revoke-read|revoke-write|reload",
+    description: "Show sandbox state, or use /sandbox allow-read|allow-write|revoke-read|revoke-write|revoke-network|reload",
     handler: async (args, ctx) => {
       const trimmed = args.trim();
       if (trimmed.toLowerCase() === "reload") {
@@ -291,8 +309,19 @@ export function registerSandboxExtension(
         ctx.ui.notify("Revoked all external write authorizations.", "info");
         return;
       }
+      if (trimmed.toLowerCase() === "revoke-network") {
+        approvedNetworkDomains.clear();
+        ctx.ui.notify("Revoked all session network authorizations.", "info");
+        return;
+      }
       ctx.ui.notify(
-        formatState(state, readAuthorization.paths(), writeAuthorization.paths(), approvedHostExecWords),
+        formatState(
+          state,
+          readAuthorization.paths(),
+          writeAuthorization.paths(),
+          approvedHostExecWords,
+          approvedNetworkDomains,
+        ),
         state.mode === "blocked" ? "error" : "info",
       );
     },
@@ -314,6 +343,7 @@ function formatState(
   readGrants: string[] = [],
   writeGrants: string[] = [],
   approvedHostExecWords: ReadonlySet<string> = new Set(),
+  approvedNetworkDomains: ReadonlySet<string> = new Set(),
 ): string {
   const lines = [
     `Sandbox: ${state.mode}`,
@@ -329,6 +359,8 @@ function formatState(
     "Network:",
     `  Allowed domains: ${config.network.allowedDomains.join(", ") || "(none)"}`,
     `  Denied domains: ${config.network.deniedDomains.join(", ") || "(none)"}`,
+    `  Prompt for unlisted domains: ${config.network.strictAllowlist === true ? "disabled" : "enabled"}`,
+    `  Session domain grants: ${[...approvedNetworkDomains].join(", ") || "(none)"}`,
     `  Local binding: ${config.network.allowLocalBinding === true ? "allowed" : "blocked"}`,
     "",
     "Filesystem:",
@@ -347,6 +379,36 @@ function formatState(
     lines.push("", "Warnings:", ...loaded.warnings.map((warning) => `  ${warning}`));
   }
   return lines.join("\n");
+}
+
+async function authorizeNetworkDomain(
+  rawHost: string,
+  port: number | undefined,
+  approvedDomains: Set<string>,
+  pendingApprovals: Map<string, Promise<boolean>>,
+  ctx: ExtensionContext,
+): Promise<boolean> {
+  const host = normalizeNetworkHost(rawHost);
+  if (approvedDomains.has(host)) return true;
+
+  const pending = pendingApprovals.get(host);
+  if (pending) return pending;
+  if (!ctx.hasUI) return false;
+
+  const approval = ctx.ui.confirm(
+    "Allow sandbox network access?",
+    `A sandboxed command attempted to connect to a domain that is not in network.allowedDomains.\n\n${host}${port === undefined ? "" : `:${port}`}\n\nAllow this exact domain on any port for the rest of this session?`,
+  ).then((approved) => {
+    if (approved) approvedDomains.add(host);
+    return approved;
+  }).finally(() => pendingApprovals.delete(host));
+  pendingApprovals.set(host, approval);
+  return approval;
+}
+
+function normalizeNetworkHost(host: string): string {
+  const normalized = host.toLowerCase();
+  return normalized.endsWith(".") ? normalized.slice(0, -1) : normalized;
 }
 
 type PathAccess = "read" | "write";

@@ -148,6 +148,9 @@ per-user OS temporary directory for toolchains (git, compilers).
 - 🔐 **External user files** require explicit session approval through
   `sandbox_authorize_read`/`sandbox_authorize_write` or `/sandbox allow-read|allow-write <path>`; the
   same gates cover Pi's direct read/search/list/write/edit tools.
+- 🌐 **Unlisted network domains** pause the connection and request approval. Exact hostname grants
+  last for the session and can be cleared with `/sandbox revoke-network`; explicit deny rules and
+  `strictAllowlist` still hard-block access.
 - ⏱️ Foreground commands have no implicit timeout and support streamed output plus process-group
   cancellation for long builds and tests.
 - ⌨️ Use `/sandbox` to inspect the effective policy, `/sandbox reload` after configuration changes, or
@@ -272,7 +275,8 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
   prompting; job status and cancellation remain visible only for tracked jobs. `/ssh-tools off|reset`
   revokes grants. No extra classifier request is made.
 - Sandbox adds no model request or persistent conversation content; it exposes compact read/write
-  authorization tools alongside the sandboxed bash backend.
+  authorization tools alongside the sandboxed bash backend. Unlisted-domain authorization uses a
+  direct user confirmation rather than another model request.
 
 ## 🎯 Design Principles
 
