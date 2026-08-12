@@ -91,15 +91,34 @@ pi --version
 
 ## 🚀 Installation
 
-### 🌍 Global installation
+### 🏷️ Install a specific release (recommended)
 
-Install once to make the package available to all projects:
+Pin the package to the current stable release so package updates do not unexpectedly move it to a newer revision:
+
+```bash
+# Global installation
+pi install git:github.com/wangrzneu/pi-agent-config@v0.1.0
+
+# Project installation (writes to .pi/settings.json)
+pi install -l git:github.com/wangrzneu/pi-agent-config@v0.1.0
+```
+
+Replace `v0.1.0` with any published [release tag](https://github.com/wangrzneu/pi-agent-config/releases), or with a full Git commit SHA. Pinned refs are not advanced by `pi update --extensions` or `pi update --all`. To upgrade an existing installation, install the desired newer tag explicitly:
+
+```bash
+pi install git:github.com/wangrzneu/pi-agent-config@vX.Y.Z
+# Add -l for a project installation.
+```
+
+### 🌍 Install the latest development version globally
+
+Omit the tag to install from the repository's default branch and make the package available to all projects:
 
 ```bash
 pi install git:github.com/wangrzneu/pi-agent-config
 ```
 
-### 📁 Project installation
+### 📁 Install the latest development version for a project
 
 Run this in the target project directory. The configuration is written to `.pi/settings.json`:
 

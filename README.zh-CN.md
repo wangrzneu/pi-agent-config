@@ -85,15 +85,34 @@ pi --version
 
 ## 🚀 安装
 
-### 🌍 全局安装
+### 🏷️ 安装指定 Release（推荐）
 
-安装后对所有项目生效：
+固定到当前稳定版本，避免更新 package 时意外切换到更新的代码：
+
+```bash
+# 全局安装
+pi install git:github.com/wangrzneu/pi-agent-config@v0.1.0
+
+# 项目级安装（写入 .pi/settings.json）
+pi install -l git:github.com/wangrzneu/pi-agent-config@v0.1.0
+```
+
+可以将 `v0.1.0` 替换为任意已发布的 [Release tag](https://github.com/wangrzneu/pi-agent-config/releases)，也可以使用完整的 Git commit SHA。执行 `pi update --extensions` 或 `pi update --all` 不会将固定的 ref 自动升级到新版本。升级已有安装时，请明确安装目标新版本：
+
+```bash
+pi install git:github.com/wangrzneu/pi-agent-config@vX.Y.Z
+# 项目级安装请增加 -l。
+```
+
+### 🌍 全局安装最新开发版本
+
+不指定 tag 时，会从仓库默认分支安装，并对所有项目生效：
 
 ```bash
 pi install git:github.com/wangrzneu/pi-agent-config
 ```
 
-### 📁 项目安装
+### 📁 为项目安装最新开发版本
 
 在目标项目目录执行，配置会写入 `.pi/settings.json`：
 
