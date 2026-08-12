@@ -2,7 +2,7 @@
 
 The sandbox extension replaces Pi's built-in `bash` execution backend and intercepts user `!` commands. It uses `@anthropic-ai/sandbox-runtime` to enforce filesystem and network policy with macOS Seatbelt (`sandbox-exec`) or Linux bubblewrap.
 
-For the architecture and the reasoning behind each behavior, see [`sandbox-design.md`](sandbox-design.md). For a feasibility analysis of replacing the OS-denied `~` access with a FUSE interception gate (authorize-then-allow), see [`sandbox-fuse-gate.md`](sandbox-fuse-gate.md).
+For the architecture and the reasoning behind each behavior, see [`sandbox-design.md`](sandbox-design.md). For the experimental macOS 26 Apple Container VM layer around the Process sandbox, see [`sandbox-apple-container.md`](sandbox-apple-container.md). For a feasibility analysis of replacing the OS-denied `~` access with a FUSE interception gate (authorize-then-allow), see [`sandbox-fuse-gate.md`](sandbox-fuse-gate.md).
 
 ## Design goals
 

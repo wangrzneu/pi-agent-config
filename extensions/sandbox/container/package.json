@@ -1,0 +1,9 @@
+{
+  "name": "pi-sandbox-guest",
+  "private": true,
+  "version": "0.0.70",
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.70"
+  }
+}

@@ -62,6 +62,7 @@
 | `docs/external-memory-test-plan.md` | 外部记忆验证方案 |
 | `docs/sandbox.md` | 沙箱行为、配置与安全边界 |
 | `docs/sandbox-design.md` | sandbox 扩展的架构与设计决策 |
+| `docs/sandbox-apple-container.md` | 实验性的 Apple Container VM + Process sandbox 叠加隔离 |
 | `docs/ssh-tools.md` | SSH 工具要求、行为与安全边界 |
 | `docs/security.md` | 安全模型概览 |
 | `docs/exploration.md` | 代码探索指引 |

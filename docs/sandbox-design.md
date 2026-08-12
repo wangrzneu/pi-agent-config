@@ -95,6 +95,29 @@ coding") and long-running work:
 5. `network.strictAllowlist: true` disables the callback path, preserving a
    deterministic hard allowlist for managed or high-assurance configurations.
 
+### Optional Apple Container isolation stack
+
+On macOS 26/Apple silicon, an opt-in Apple Container layer wraps rather than
+replaces the Process backend:
+
+```text
+trusted host mount planner → Apple lightweight VM → guest ASRT/bubblewrap
+```
+
+The actual command runs only in guest ASRT. Apple `container` cannot run under
+`sandbox-exec` (even `allow default` makes its XPC service appear unregistered),
+so a trusted data-only planner invokes a fixed binary with generated argv and
+sends command text over stdin. A per-command APFS clonefile workspace prevents
+the VM from writing the host workspace directly; a trusted reconciler validates
+the complete change set against the same write policy before committing it.
+Guest ASRT keeps bubblewrap filesystem/PID/network namespaces and proxy-only
+egress; its Unix-socket seccomp helper is disabled because Apple's guest kernel
+rejects the helper's second nested user namespace and no host socket is mounted.
+Unsupported grants fail closed. The implementation never creates Apple volumes
+and uses `--rm`, tmpfs, shared image snapshots, and a process-scoped cache to
+minimize disk use. See
+[`sandbox-apple-container.md`](sandbox-apple-container.md).
+
 ### Graceful shutdown
 
 `session_shutdown` stops tracked children (`TERM`→`KILL` on the process

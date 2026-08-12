@@ -1,0 +1,14 @@
+FROM node:22-alpine
+
+# ASRT's bundled apply-seccomp binary is libc-independent, so musl keeps this
+# image substantially smaller than a Debian/glibc development image.
+RUN apk add --no-cache bash bubblewrap ca-certificates curl git ripgrep socat
+
+WORKDIR /opt/pi-sandbox
+COPY package.json package-lock.json /opt/pi-sandbox/
+RUN npm ci --omit=dev --no-audit --no-fund \
+  && npm cache clean --force
+
+COPY guest-runner.mjs /opt/pi-sandbox/guest-runner.mjs
+
+ENTRYPOINT ["node", "/opt/pi-sandbox/guest-runner.mjs"]

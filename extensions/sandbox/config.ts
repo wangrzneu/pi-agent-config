@@ -5,8 +5,23 @@ import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { SANDBOX_TEMP_ROOT } from "./sandbox-paths.ts";
 import { errorMessage } from "./util.ts";
 
+export interface AppleContainerConfig {
+  enabled: boolean;
+  binary: string;
+  image: string;
+  platform: "linux/arm64";
+  shell: string;
+  cpus: number;
+  memory: string;
+  pullPolicy: "never";
+  workspaceMode: "transactional-apfs";
+}
+
 export interface SandboxConfig extends SandboxRuntimeConfig {
   enabled: boolean;
+  isolation: {
+    appleContainer: AppleContainerConfig;
+  };
   /**
    * Commands that always run on the host (after session-level approval) because
    * their default configuration lives in `~`-homed credential files that the
@@ -128,6 +143,22 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
   credentials: {
     envVars: SENSITIVE_ENV_VARS.map((name) => ({ name, mode: "deny" as const })),
   },
+  isolation: {
+    // Apple Container is an additional VM layer around the existing Process
+    // sandbox, never a replacement for it. It is opt-in until the local image
+    // has been built and the macOS container service is running.
+    appleContainer: {
+      enabled: false,
+      binary: "/opt/homebrew/bin/container",
+      image: "local/pi-sandbox-asrt:0.0.70",
+      platform: "linux/arm64",
+      shell: "/bin/bash",
+      cpus: 2,
+      memory: "2g",
+      pullPolicy: "never",
+      workspaceMode: "transactional-apfs",
+    },
+  },
   hostExec: {
     // Only cloud-CLI tools whose credentials live in `~` files and whose
     // operations are network-bound are promoted to the host by default:
@@ -163,6 +194,15 @@ export function mergeSandboxConfig(
   for (const key of [...RUNTIME_PASSTHROUGH_KEYS, "hostExec"] as const) {
     if (overrides[key] !== undefined) {
       (merged as unknown as Record<string, unknown>)[key] = structuredClone(overrides[key]);
+    }
+  }
+  if (isRecord(overrides.isolation)) {
+    const isolation = overrides.isolation;
+    if (isRecord(isolation.appleContainer)) {
+      merged.isolation.appleContainer = {
+        ...merged.isolation.appleContainer,
+        ...structuredClone(isolation.appleContainer),
+      } as AppleContainerConfig;
     }
   }
 

@@ -17,6 +17,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { loadSandboxConfig, type LoadedSandboxConfig } from "./config.ts";
+import {
+  AppleContainerController,
+  createAppleContainerBashOperations,
+} from "./apple-container.ts";
 import { matchHostExecCommand } from "./host-escape.ts";
 import { loadGitIdentity, type GitIdentity } from "./git-identity.ts";
 import {
@@ -78,6 +82,7 @@ export function registerSandboxExtension(
   authorizationOptions: AuthorizationOptions = {},
 ): void {
   const tracker = new SandboxProcessTracker();
+  const appleContainer = new AppleContainerController();
   const piReadRoots = authorizationOptions.piReadRoots ?? defaultPiReadRoots();
   const authOptions = { ...authorizationOptions, piReadRoots };
   const readAuthorization = new SandboxPathAuthorization(authOptions);
@@ -91,7 +96,7 @@ export function registerSandboxExtension(
   const approvedHostExecWords = new Set<string>();
   const approvedNetworkDomains = new Set<string>();
   const pendingNetworkApprovals = new Map<string, Promise<boolean>>();
-  const operations = createSandboxedBashOperations(runtime, tracker, () => {
+  const processOperations = createSandboxedBashOperations(runtime, tracker, () => {
     const filesystem = state.loaded?.config.filesystem;
     if (!filesystem) return undefined;
     return {
@@ -108,6 +113,28 @@ export function registerSandboxExtension(
       },
     };
   }, () => gitIdentity);
+
+  const commandOperations = (ctx: ExtensionContext) => {
+    const config = state.loaded?.config;
+    if (!config?.isolation.appleContainer.enabled) return processOperations;
+    return createAppleContainerBashOperations(appleContainer, {
+      tracker,
+      container: config.isolation.appleContainer,
+      policy: () => ({
+        config,
+        readGrants: readAuthorization.paths(),
+        writeGrants: writeAuthorization.paths(),
+      }),
+      gitIdentity: () => gitIdentity,
+      authorizeNetwork: (host, port) => authorizeNetworkDomain(
+        host,
+        port,
+        approvedNetworkDomains,
+        pendingNetworkApprovals,
+        ctx,
+      ),
+    });
+  };
 
   pi.registerFlag("no-sandbox", {
     description: "Explicitly run local bash commands without OS-level sandboxing",
@@ -154,7 +181,7 @@ export function registerSandboxExtension(
       }
 
       const tool = state.mode === "sandboxed"
-        ? createBashToolDefinition(ctx.cwd, { operations })
+        ? createBashToolDefinition(ctx.cwd, { operations: commandOperations(ctx) })
         : createBashToolDefinition(ctx.cwd);
       return tool.execute(id, params, signal, onUpdate, ctx);
     },
@@ -172,8 +199,8 @@ export function registerSandboxExtension(
     };
   });
 
-  pi.on("user_bash", () => {
-    if (state.mode === "sandboxed") return { operations };
+  pi.on("user_bash", (_event, ctx) => {
+    if (state.mode === "sandboxed") return { operations: commandOperations(ctx) };
     if (state.mode === "blocked" || state.mode === "starting") {
       return {
         result: {
@@ -246,11 +273,20 @@ export function registerSandboxExtension(
         ),
       );
       initialized = true;
+      if (loaded.config.isolation.appleContainer.enabled) {
+        await appleContainer.preflight(loaded.config.isolation.appleContainer);
+      }
       state = { mode: "sandboxed", reason: "active", loaded };
       setStatus(ctx, state);
-      ctx.ui.notify("OS-level sandbox initialized", "info");
+      ctx.ui.notify(
+        loaded.config.isolation.appleContainer.enabled
+          ? "Apple Container + Process sandbox initialized"
+          : "OS-level sandbox initialized",
+        "info",
+      );
     } catch (error) {
       await runtime.reset().catch(() => undefined);
+      initialized = false;
       state = {
         mode: "blocked",
         reason: `initialization failed: ${errorMessage(error)}`,
@@ -262,6 +298,8 @@ export function registerSandboxExtension(
   });
 
   pi.on("session_shutdown", async (event, ctx) => {
+    const containerBinary = state.loaded?.config.isolation.appleContainer.binary;
+    if (containerBinary) await appleContainer.stopAll(containerBinary);
     await tracker.stopAll();
     readAuthorization.revoke();
     writeAuthorization.revoke();
@@ -355,6 +393,13 @@ function formatState(
   const config = loaded.config;
   lines.push(
     `Configuration: ${loaded.loadedFrom.join(", ") || "built-in defaults"}`,
+    "",
+    "Isolation:",
+    `  Host launcher: ${config.isolation.appleContainer.enabled ? "trusted fixed argv (Apple XPC is incompatible with Seatbelt)" : "ASRT (Seatbelt/bubblewrap)"}`,
+    `  Apple Container VM: ${config.isolation.appleContainer.enabled ? "enabled" : "disabled"}`,
+    `  Guest process: ${config.isolation.appleContainer.enabled ? "ASRT (bubblewrap + proxy; VM isolates host IPC)" : "not applicable"}`,
+    `  Workspace: ${config.isolation.appleContainer.enabled ? config.isolation.appleContainer.workspaceMode : "direct"}`,
+    `  Policy parity: ${config.isolation.appleContainer.enabled ? "strict (transactional workspace)" : "process backend"}`,
     "",
     "Network:",
     `  Allowed domains: ${config.network.allowedDomains.join(", ") || "(none)"}`,

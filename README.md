@@ -63,6 +63,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | `docs/external-memory-test-plan.md` | Verification plan for external memory |
 | `docs/sandbox.md` | Sandbox behavior, configuration, and security boundaries |
 | `docs/sandbox-design.md` | Architecture and design decisions for the sandbox extension |
+| `docs/sandbox-apple-container.md` | Experimental Apple Container VM + Process sandbox isolation layer |
 | `docs/ssh-tools.md` | SSH tool requirements, behavior, and security boundaries |
 | `docs/security.md` | Security model overview |
 | `docs/claude-code-sandbox.md` | Research: how Claude Code uses sandboxing (primary-source reverse engineering) |
