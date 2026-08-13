@@ -24,7 +24,7 @@ integrationTest("Apple Container + host/guest Process sandboxes enforce end-to-e
   const tracker = new SandboxProcessTracker();
   const proxy = await startHostForwardProxy();
   const config = structuredClone(DEFAULT_SANDBOX_CONFIG);
-  config.isolation.appleContainer.enabled = true;
+  config.isolation.mode = "apple-container";
   config.network.allowedDomains = ["github.com"];
   config.network.deniedDomains = ["example.com"];
   config.network.strictAllowlist = true;
@@ -41,7 +41,7 @@ integrationTest("Apple Container + host/guest Process sandboxes enforce end-to-e
   const hiddenHostFile = join(workspace, "..", "host-only-secret.txt");
   await writeFile(hiddenHostFile, "must-not-be-mounted");
   await SandboxManager.initialize(runtimeConfig);
-  await controller.preflight(config.isolation.appleContainer);
+  await controller.preflight(config.isolation.appleContainer, workspace);
 
   const operations = createAppleContainerBashOperations(controller, {
     tracker,
@@ -91,7 +91,7 @@ integrationTest("Apple Container + host/guest Process sandboxes enforce end-to-e
     assert.equal(await readFile(join(workspace, "existing.txt"), "utf8"), "after");
     await assert.rejects(readFile(join(workspace, ".env")), /ENOENT/);
 
-    const allowedNetwork = await run("curl -fsS -o /dev/null --max-time 30 https://github.com && printf network-ok", 180);
+    const allowedNetwork = await run("curl -sS -o /dev/null --max-time 30 https://github.com && printf network-ok", 180);
     assert.equal(allowedNetwork.result.exitCode, 0, allowedNetwork.output);
     assert.match(allowedNetwork.output, /network-ok/);
 

@@ -16,10 +16,15 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { loadSandboxConfig, type LoadedSandboxConfig } from "./config.ts";
+import {
+  loadSandboxConfig,
+  type LoadedSandboxConfig,
+  type SandboxBackendMode,
+} from "./config.ts";
 import {
   AppleContainerController,
   createAppleContainerBashOperations,
+  type AppleContainerLifecycle,
 } from "./apple-container.ts";
 import { matchHostExecCommand } from "./host-escape.ts";
 import { loadGitIdentity, type GitIdentity } from "./git-identity.ts";
@@ -34,13 +39,23 @@ import { errorMessage } from "./util.ts";
 
 const STATUS_KEY = "sandbox";
 
-type SandboxMode = "starting" | "sandboxed" | "bypass" | "blocked";
+type EffectiveSandboxBackend = Exclude<SandboxBackendMode, "auto">;
 
-interface SandboxState {
-  mode: SandboxMode;
-  reason: string;
-  loaded?: LoadedSandboxConfig;
-}
+type SandboxState =
+  | {
+      mode: "starting" | "bypass" | "blocked";
+      reason: string;
+      loaded?: LoadedSandboxConfig;
+      requestedBackend?: SandboxBackendMode;
+      effectiveBackend?: never;
+    }
+  | {
+      mode: "sandboxed";
+      reason: string;
+      loaded: LoadedSandboxConfig;
+      requestedBackend: SandboxBackendMode;
+      effectiveBackend: EffectiveSandboxBackend;
+    };
 
 interface SandboxRuntime extends SandboxCommandRuntime {
   initialize(config: SandboxRuntimeConfig, ask?: SandboxAskCallback): Promise<void>;
@@ -55,6 +70,23 @@ export default function sandboxExtension(pi: ExtensionAPI): void {
 export interface AuthorizationOptions {
   allowOsTemp?: boolean;
   piReadRoots?: string[];
+  /** Test seam for Apple Container prerequisite and lifecycle behavior. */
+  appleContainerController?: AppleContainerLifecycle;
+}
+
+export function resolveSandboxBackendMode(
+  flagValue: boolean | string | undefined,
+  configured: unknown,
+): SandboxBackendMode {
+  const hasFlag = flagValue !== undefined && flagValue !== false && flagValue !== "";
+  const candidate = hasFlag ? flagValue : configured;
+  if (candidate === "auto" || candidate === "process" || candidate === "apple-container") {
+    return candidate;
+  }
+  const source = hasFlag ? "--sandbox-mode" : "isolation.mode";
+  throw new Error(
+    `Invalid ${source} ${JSON.stringify(candidate)}; expected auto, process, or apple-container`,
+  );
 }
 
 export function defaultPiReadRoots(homeDir: string = homedir()): string[] {
@@ -82,7 +114,7 @@ export function registerSandboxExtension(
   authorizationOptions: AuthorizationOptions = {},
 ): void {
   const tracker = new SandboxProcessTracker();
-  const appleContainer = new AppleContainerController();
+  const appleContainer = authorizationOptions.appleContainerController ?? new AppleContainerController();
   const piReadRoots = authorizationOptions.piReadRoots ?? defaultPiReadRoots();
   const authOptions = { ...authorizationOptions, piReadRoots };
   const readAuthorization = new SandboxPathAuthorization(authOptions);
@@ -115,8 +147,10 @@ export function registerSandboxExtension(
   }, () => gitIdentity);
 
   const commandOperations = (ctx: ExtensionContext) => {
-    const config = state.loaded?.config;
-    if (!config?.isolation.appleContainer.enabled) return processOperations;
+    if (state.mode !== "sandboxed" || state.effectiveBackend !== "apple-container") {
+      return processOperations;
+    }
+    const config = state.loaded.config;
     return createAppleContainerBashOperations(appleContainer, {
       tracker,
       container: config.isolation.appleContainer,
@@ -140,6 +174,11 @@ export function registerSandboxExtension(
     description: "Explicitly run local bash commands without OS-level sandboxing",
     type: "boolean",
     default: false,
+  });
+
+  pi.registerFlag("sandbox-mode", {
+    description: "Sandbox backend: auto, process, or apple-container",
+    type: "string",
   });
 
   registerPathAuthorizationTool(pi, "read", readAuthorization);
@@ -259,7 +298,12 @@ export function registerSandboxExtension(
       return;
     }
 
+    let requestedBackend: SandboxBackendMode | undefined;
     try {
+      requestedBackend = resolveSandboxBackendMode(
+        pi.getFlag("sandbox-mode"),
+        loaded.config.isolation.mode,
+      );
       await ensureSandboxTempRoot();
       const { enabled: _enabled, ...runtimeConfig } = loaded.config;
       await runtime.initialize(
@@ -273,15 +317,35 @@ export function registerSandboxExtension(
         ),
       );
       initialized = true;
-      if (loaded.config.isolation.appleContainer.enabled) {
-        await appleContainer.preflight(loaded.config.isolation.appleContainer);
+
+      let effectiveBackend: EffectiveSandboxBackend = "process";
+      let fallbackReason: string | undefined;
+      if (requestedBackend !== "process") {
+        try {
+          await appleContainer.preflight(loaded.config.isolation.appleContainer, ctx.cwd);
+          effectiveBackend = "apple-container";
+        } catch (error) {
+          if (requestedBackend === "apple-container") throw error;
+          fallbackReason = errorMessage(error);
+          ctx.ui.notify(
+            `Apple Container prerequisites are not satisfied (${fallbackReason}). Falling back to the Process sandbox. Use --sandbox-mode apple-container to require VM isolation.`,
+            "warning",
+          );
+        }
       }
-      state = { mode: "sandboxed", reason: "active", loaded };
+
+      state = {
+        mode: "sandboxed",
+        reason: fallbackReason ? `active; automatic Process fallback: ${fallbackReason}` : "active",
+        loaded,
+        requestedBackend,
+        effectiveBackend,
+      };
       setStatus(ctx, state);
       ctx.ui.notify(
-        loaded.config.isolation.appleContainer.enabled
+        effectiveBackend === "apple-container"
           ? "Apple Container + Process sandbox initialized"
-          : "OS-level sandbox initialized",
+          : "Process sandbox initialized",
         "info",
       );
     } catch (error) {
@@ -291,6 +355,7 @@ export function registerSandboxExtension(
         mode: "blocked",
         reason: `initialization failed: ${errorMessage(error)}`,
         loaded,
+        requestedBackend,
       };
       setStatus(ctx, state);
       ctx.ui.notify(`Sandbox ${state.reason}. Bash is blocked; use --no-sandbox only for an explicit bypass.`, "error");
@@ -391,15 +456,18 @@ function formatState(
   if (!loaded) return lines.join("\n");
 
   const config = loaded.config;
+  const usesAppleContainer = state.effectiveBackend === "apple-container";
   lines.push(
     `Configuration: ${loaded.loadedFrom.join(", ") || "built-in defaults"}`,
+    `Requested backend: ${state.requestedBackend ?? "not resolved"}`,
+    `Effective backend: ${state.effectiveBackend ?? "not active"}`,
     "",
     "Isolation:",
-    `  Host launcher: ${config.isolation.appleContainer.enabled ? "trusted fixed argv (Apple XPC is incompatible with Seatbelt)" : "ASRT (Seatbelt/bubblewrap)"}`,
-    `  Apple Container VM: ${config.isolation.appleContainer.enabled ? "enabled" : "disabled"}`,
-    `  Guest process: ${config.isolation.appleContainer.enabled ? "ASRT (bubblewrap + proxy; VM isolates host IPC)" : "not applicable"}`,
-    `  Workspace: ${config.isolation.appleContainer.enabled ? config.isolation.appleContainer.workspaceMode : "direct"}`,
-    `  Policy parity: ${config.isolation.appleContainer.enabled ? "strict (transactional workspace)" : "process backend"}`,
+    `  Host launcher: ${usesAppleContainer ? "trusted fixed argv (Apple XPC is incompatible with Seatbelt)" : "ASRT (Seatbelt/bubblewrap)"}`,
+    `  Apple Container VM: ${usesAppleContainer ? "enabled" : "disabled"}`,
+    `  Guest process: ${usesAppleContainer ? "ASRT (bubblewrap + proxy; VM isolates host IPC)" : "not applicable"}`,
+    `  Workspace: ${usesAppleContainer ? config.isolation.appleContainer.workspaceMode : "direct"}`,
+    `  Policy parity: ${usesAppleContainer ? "strict (transactional workspace)" : "process backend"}`,
     "",
     "Network:",
     `  Allowed domains: ${config.network.allowedDomains.join(", ") || "(none)"}`,

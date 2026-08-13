@@ -164,8 +164,10 @@ pi
 - 🌐 **未列入白名单的网络域名**会暂停连接并请求授权。精确主机名授权持续到当前 session，
   可用 `/sandbox revoke-network` 清除；显式拒绝规则和 `strictAllowlist` 仍会硬性阻止访问。
 - ⏱️ 前台命令没有隐式超时，并支持流式输出和进程组取消，适合耗时较长的构建与测试。
-- ⌨️ 使用 `/sandbox` 查看生效策略，修改配置后执行 `/sandbox reload`；只有明确传入
-  `--no-sandbox` 才会绕过沙箱。
+- 🍎 backend 默认为 `auto`：Apple Container 条件满足时自动启用，否则 Pi 会提示原因并使用
+  Process sandbox。可通过 `--sandbox-mode auto|process|apple-container` 覆盖。
+- ⌨️ 使用 `/sandbox` 查看请求/实际采用的 backend 和生效策略，修改配置后执行
+  `/sandbox reload`；只有明确传入 `--no-sandbox` 才会绕过沙箱。
 
 ### 💬 `/btw` 临时提问
 

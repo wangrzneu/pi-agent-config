@@ -173,8 +173,10 @@ per-user OS temporary directory for toolchains (git, compilers).
   `strictAllowlist` still hard-block access.
 - ⏱️ Foreground commands have no implicit timeout and support streamed output plus process-group
   cancellation for long builds and tests.
-- ⌨️ Use `/sandbox` to inspect the effective policy, `/sandbox reload` after configuration changes, or
-  `--no-sandbox` for an explicit bypass.
+- 🍎 Backend mode defaults to `auto`: Apple Container is selected when its prerequisites pass; otherwise
+  Pi warns and uses the Process sandbox. Override with `--sandbox-mode auto|process|apple-container`.
+- ⌨️ Use `/sandbox` to inspect the requested/effective backend and policy, `/sandbox reload` after
+  configuration changes, or `--no-sandbox` for an explicit unsandboxed bypass.
 
 ### 💬 Side questions with `/btw`
 

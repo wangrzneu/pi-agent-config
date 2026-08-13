@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   buildContainerRunArgs,
+  captureCommand,
   compileGuestPolicy,
   validateAppleContainerConfig,
 } from "./apple-container.ts";
@@ -18,26 +19,47 @@ import {
 
 const containerConfig = DEFAULT_SANDBOX_CONFIG.isolation.appleContainer;
 
-test("Apple Container isolation is opt-in and merges without replacing defaults", () => {
-  assert.equal(containerConfig.enabled, false);
+test("Apple Container isolation defaults to auto and merges without replacing defaults", () => {
+  assert.equal(DEFAULT_SANDBOX_CONFIG.isolation.mode, "auto");
   const merged = mergeSandboxConfig(DEFAULT_SANDBOX_CONFIG, {
-    isolation: { appleContainer: { enabled: true, memory: "4g" } },
+    isolation: { mode: "apple-container", appleContainer: { memory: "4g" } },
   });
-  assert.equal(merged.isolation.appleContainer.enabled, true);
+  assert.equal(merged.isolation.mode, "apple-container");
   assert.equal(merged.isolation.appleContainer.memory, "4g");
   assert.equal(merged.isolation.appleContainer.image, containerConfig.image);
   assert.equal(merged.isolation.appleContainer.workspaceMode, "transactional-apfs");
 });
 
+test("legacy Apple Container enabled values migrate to backend modes", () => {
+  const forced = mergeSandboxConfig(DEFAULT_SANDBOX_CONFIG, {
+    isolation: { appleContainer: { enabled: true } },
+  });
+  const disabled = mergeSandboxConfig(DEFAULT_SANDBOX_CONFIG, {
+    isolation: { appleContainer: { enabled: false } },
+  });
+  assert.equal(forced.isolation.mode, "apple-container");
+  assert.equal(disabled.isolation.mode, "process");
+  assert.equal("enabled" in forced.isolation.appleContainer, false);
+});
+
 test("strict Apple Container configuration rejects policy-weakening modes", () => {
   assert.throws(
-    () => validateAppleContainerConfig({ ...containerConfig, enabled: true, pullPolicy: "missing" }),
+    () => validateAppleContainerConfig({ ...containerConfig, pullPolicy: "missing" }),
     /pullPolicy must be 'never'/,
   );
   assert.throws(
-    () => validateAppleContainerConfig({ ...containerConfig, enabled: true, workspaceMode: "direct" }),
+    () => validateAppleContainerConfig({ ...containerConfig, workspaceMode: "direct" }),
     /transactional-apfs/,
   );
+});
+
+test("preflight commands time out instead of hanging startup", async () => {
+  const started = Date.now();
+  await assert.rejects(
+    captureCommand(process.execPath, ["-e", "setInterval(() => {}, 1000)"], 50),
+    /timed out after 50ms/,
+  );
+  assert.ok(Date.now() - started < 2_000);
 });
 
 test("container launch plan is ephemeral, root-read-only, and uses bind mounts instead of volumes", () => {

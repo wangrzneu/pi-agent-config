@@ -95,10 +95,10 @@ coding") and long-running work:
 5. `network.strictAllowlist: true` disables the callback path, preserving a
    deterministic hard allowlist for managed or high-assurance configurations.
 
-### Optional Apple Container isolation stack
+### Automatically selected Apple Container isolation stack
 
-On macOS 26/Apple silicon, an opt-in Apple Container layer wraps rather than
-replaces the Process backend:
+On macOS 26/Apple silicon, the default `auto` mode checks whether an Apple
+Container layer can wrap rather than replace the Process backend:
 
 ```text
 trusted host mount planner → Apple lightweight VM → guest ASRT/bubblewrap
@@ -113,9 +113,12 @@ the complete change set against the same write policy before committing it.
 Guest ASRT keeps bubblewrap filesystem/PID/network namespaces and proxy-only
 egress; its Unix-socket seccomp helper is disabled because Apple's guest kernel
 rejects the helper's second nested user namespace and no host socket is mounted.
-Unsupported grants fail closed. The implementation never creates Apple volumes
-and uses `--rm`, tmpfs, shared image snapshots, and a process-scoped cache to
-minimize disk use. See
+Unsupported grants fail closed. At session startup, `auto` selects this stack
+only after the platform, CLI version, service, local image, and APFS checks pass; a
+failed check is reported and falls back only to the Process sandbox. Forced
+`apple-container` mode blocks instead. The implementation never creates Apple
+volumes and uses `--rm`, tmpfs, shared image snapshots, and a process-scoped
+cache to minimize disk use. See
 [`sandbox-apple-container.md`](sandbox-apple-container.md).
 
 ### Graceful shutdown
@@ -142,8 +145,11 @@ confusing "authorize a temp file" prompts).
 
 `session_start` tries to `SandboxManager.initialize`; on failure the state is
 `blocked` and both `bash` and `!` refuse to run. **Why:** silently running
-unsandboxed turns a security feature into a false sense of safety. The escape
-hatch is explicit (`--no-sandbox` or `"enabled": false`).
+unsandboxed turns a security feature into a false sense of safety. In backend
+`auto` mode only, an unavailable Apple VM is reported and falls back to the
+already-initialized Process sandbox, never plain host execution. Forced
+`apple-container` mode blocks. The unsandboxed escape hatch remains explicit
+(`--no-sandbox` or top-level `"enabled": false`).
 
 ### 3. Per-exec filesystem grants
 
@@ -222,7 +228,7 @@ trustd grant on macOS) rather than pretending otherwise.
 | State | Meaning | bash/`!` behavior | Direct tools |
 | --- | --- | --- | --- |
 | `starting` | session not initialized yet | blocked | gated (workspace-only) |
-| `sandboxed` | runtime initialized | sandboxed; unlisted domains request approval | gated (workspace + grants) |
+| `sandboxed` | Process runtime initialized; optional Apple VM selected | requested backend, or reported `auto` fallback to Process; unlisted domains request approval | gated (workspace + grants) |
 | `bypass` | `--no-sandbox` / `enabled:false` | plain host shell | **not gated** |
 | `blocked` | init failed | blocked | gated (workspace-only) |
 

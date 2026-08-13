@@ -9,6 +9,7 @@ import type { AppleContainerConfig, SandboxConfig } from "./config.ts";
 import { codingCacheEnvironment, SandboxProcessTracker } from "./process.ts";
 import { SANDBOX_TEMP_ROOT } from "./sandbox-paths.ts";
 import {
+  assertApfsPath,
   createTransactionalWorkspace,
   discardTransactionalWorkspace,
   reconcileTransactionalWorkspace,
@@ -18,6 +19,7 @@ import type { GitIdentity } from "./git-identity.ts";
 const GUEST_CACHE_ROOT = "/var/pi-cache";
 const TRANSACTION_ROOT = join(SANDBOX_TEMP_ROOT, "transactions");
 const TERMINATION_GRACE_MS = 1_500;
+const PREFLIGHT_COMMAND_TIMEOUT_MS = 12_000;
 
 export interface AppleContainerPolicySource {
   config: SandboxConfig;
@@ -33,23 +35,35 @@ export interface AppleContainerOperationsOptions {
   authorizeNetwork: (host: string, port?: number) => Promise<boolean>;
 }
 
-export class AppleContainerController {
+export interface AppleContainerLifecycle {
+  preflight(config: AppleContainerConfig, workspace?: string): Promise<void>;
+  track(name: string): void;
+  release(name: string): void;
+  forceDelete(binary: string, name: string): Promise<void>;
+  stopAll(binary: string): Promise<void>;
+}
+
+export class AppleContainerController implements AppleContainerLifecycle {
   private readonly activeNames = new Set<string>();
 
-  async preflight(config: AppleContainerConfig): Promise<void> {
+  async preflight(config: AppleContainerConfig, workspace?: string): Promise<void> {
     validateAppleContainerConfig(config);
     if (process.platform !== "darwin" || process.arch !== "arm64") {
       throw new Error("Apple Container isolation requires macOS on Apple silicon");
     }
     if (!existsSync(config.binary)) throw new Error(`Apple container CLI not found: ${config.binary}`);
-    const version = await capture(config.binary, ["--version"]);
+    const version = await captureCommand(config.binary, ["--version"]);
     if (!/\b0\.10\./.test(version)) {
       throw new Error(`Apple container CLI 0.10.x is required; found: ${version.trim()}`);
     }
-    await capture(config.binary, ["system", "status", "--format", "json"]);
-    await capture(config.binary, ["image", "inspect", config.image]);
+    await captureCommand(config.binary, ["system", "status", "--format", "json"]);
+    await captureCommand(config.binary, ["image", "inspect", config.image]);
     await mkdir(join(SANDBOX_TEMP_ROOT, "cache"), { recursive: true, mode: 0o700 });
     await mkdir(TRANSACTION_ROOT, { recursive: true, mode: 0o700 });
+    if (workspace !== undefined) {
+      await assertApfsPath(workspace);
+      await assertApfsPath(TRANSACTION_ROOT);
+    }
   }
 
   track(name: string): void {
@@ -62,7 +76,7 @@ export class AppleContainerController {
 
   async forceDelete(binary: string, name: string): Promise<void> {
     this.activeNames.delete(name);
-    await capture(binary, ["delete", "--force", name]).catch(() => undefined);
+    await captureCommand(binary, ["delete", "--force", name]).catch(() => undefined);
   }
 
   async stopAll(binary: string): Promise<void> {
@@ -71,7 +85,7 @@ export class AppleContainerController {
 }
 
 export function createAppleContainerBashOperations(
-  controller: AppleContainerController,
+  controller: AppleContainerLifecycle,
   options: AppleContainerOperationsOptions,
 ): BashOperations {
   return {
@@ -206,7 +220,6 @@ export function createAppleContainerBashOperations(
 }
 
 export function validateAppleContainerConfig(config: AppleContainerConfig): void {
-  if (config.enabled !== true) return;
   if (!isAbsolute(config.binary)) throw new Error("Apple container binary must be an absolute path");
   if (!config.image || /\s/.test(config.image)) throw new Error("Apple container image must be a non-empty OCI reference without whitespace");
   if (config.platform !== "linux/arm64") throw new Error("Apple Container sandbox images must use linux/arm64");
@@ -381,17 +394,49 @@ function terminateProcessTree(child: ChildProcess | undefined, signal: NodeJS.Si
   }
 }
 
-function capture(command: string, args: string[]): Promise<string> {
+export function captureCommand(
+  command: string,
+  args: string[],
+  timeoutMs: number = PREFLIGHT_COMMAND_TIMEOUT_MS,
+): Promise<string> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
+    });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    let timedOut = false;
+    let killHandle: NodeJS.Timeout | undefined;
+    const timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      terminateProcessTree(child, "SIGTERM");
+      killHandle = setTimeout(
+        () => terminateProcessTree(child, "SIGKILL"),
+        TERMINATION_GRACE_MS,
+      );
+    }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timeoutHandle);
+      if (killHandle !== undefined) clearTimeout(killHandle);
+    };
+
     child.stdout.on("data", (chunk) => stdout.push(chunk));
     child.stderr.on("data", (chunk) => stderr.push(chunk));
-    child.once("error", reject);
+    child.once("error", (error) => {
+      cleanup();
+      reject(error);
+    });
     child.once("close", (code) => {
-      if (code === 0) resolvePromise(Buffer.concat(stdout).toString("utf8"));
-      else reject(new Error(`${command} ${args.join(" ")} failed (${code}): ${Buffer.concat(stderr).toString("utf8").trim()}`));
+      cleanup();
+      const invocation = `${command} ${args.join(" ")}`;
+      if (timedOut) {
+        reject(new Error(`${invocation} timed out after ${timeoutMs}ms`));
+      } else if (code === 0) {
+        resolvePromise(Buffer.concat(stdout).toString("utf8"));
+      } else {
+        reject(new Error(`${invocation} failed (${code}): ${Buffer.concat(stderr).toString("utf8").trim()}`));
+      }
     });
   });
 }

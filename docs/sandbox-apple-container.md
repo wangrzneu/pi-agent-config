@@ -12,7 +12,7 @@ Trusted host mount planner -> Apple Container lightweight VM -> Guest ASRT / bub
         +-- fixed CLI argv; command sent over stdin                     +-- actual user command
 ```
 
-It is experimental and disabled by default.
+It is experimental. The default `auto` mode checks its prerequisites at session startup, enables it when they all pass, and otherwise reports the failed check before falling back to the Process sandbox.
 
 ## Security model
 
@@ -24,7 +24,7 @@ The same effective policy is enforced at multiple points:
 - Guest ASRT applies the existing filesystem, domain, local-binding, and credential policy to the actual command using Linux bubblewrap and HTTP/SOCKS proxies. Apple Container's guest kernel rejects ASRT's second nested user namespace, so the Unix-socket seccomp helper is disabled with `allowAllUnixSockets`; no host Unix socket is mounted, and the VM supplies the stronger host-IPC boundary.
 - Unlisted guest domains use the same Pi session approval set and TUI confirmation flow.
 
-A layer that cannot represent a requested capability fails closed; it does not fall back to a direct writable mount or an unsandboxed guest command.
+A layer that cannot represent a requested capability fails closed; it does not fall back to a direct writable mount or an unsandboxed guest command. Automatic prerequisite fallback goes only to the existing Process sandbox. Explicit `apple-container` mode blocks shell execution instead of falling back.
 
 ## Transactional APFS workspace
 
@@ -79,15 +79,15 @@ container build --platform linux/arm64 \
 
 The image contains Node.js, ASRT 0.0.70, bubblewrap, seccomp support, socat, ripgrep, bash, git, and CA certificates. `package-lock.json` pins transitive npm dependencies.
 
-## Configuration
+## Backend selection
 
-Enable the additional layer in a trusted `.pi/sandbox.json` or the global sandbox configuration:
+The default configuration uses automatic selection:
 
 ```json
 {
   "isolation": {
+    "mode": "auto",
     "appleContainer": {
-      "enabled": true,
       "binary": "/opt/homebrew/bin/container",
       "image": "local/pi-sandbox-asrt:0.0.70",
       "platform": "linux/arm64",
@@ -101,9 +101,27 @@ Enable the additional layer in a trusted `.pi/sandbox.json` or the global sandbo
 }
 ```
 
-`pullPolicy` and `workspaceMode` are intentionally fixed. The extension checks that the image already exists before enabling bash, so it does not silently download an image. Pinning a custom local image to an immutable digest is recommended once the workflow is stable.
+At every session start, `auto` checks the platform, architecture, CLI path and version, container service status, local image, and APFS support for both the workspace and transaction root. Apple CLI checks have bounded timeouts, so a stuck XPC request cannot hold startup indefinitely. If every check passes, Apple Container is selected. Otherwise Pi emits a warning containing the failed check and continues with the Process sandbox. It never falls back to an unsandboxed host shell.
 
-Run `/sandbox reload`, then `/sandbox`. The status includes all active isolation layers and policy-parity mode.
+Select a backend for one Pi invocation with:
+
+```bash
+pi --sandbox-mode auto
+pi --sandbox-mode process
+pi --sandbox-mode apple-container
+```
+
+| Mode | Behavior when Apple Container prerequisites fail |
+| --- | --- |
+| `auto` | Warn and use the Process sandbox |
+| `process` | Skip Apple checks and use the Process sandbox |
+| `apple-container` | Fail closed; block `bash` and `!` |
+
+The CLI flag overrides `isolation.mode`. For backward compatibility, existing `isolation.appleContainer.enabled: true` configuration is migrated to forced `apple-container`, while `false` is migrated to `process`; new configuration should use `isolation.mode`. `--no-sandbox` remains the separate, explicit bypass for both backends.
+
+`pullPolicy` and `workspaceMode` are intentionally fixed. The extension checks that the image already exists before selecting VM isolation, so it does not silently download an image. Pinning a custom local image to an immutable digest is recommended once the workflow is stable.
+
+Initialization happens automatically on session startup. Run `/sandbox` to see both the requested and effective backends. Use `/sandbox reload` only after changing configuration.
 
 ## Current fail-closed restrictions
 

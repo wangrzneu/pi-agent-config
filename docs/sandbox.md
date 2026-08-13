@@ -20,7 +20,9 @@ The defaults are intended for everyday, iterative coding:
 - Foreground builds, tests, and migrations have no implicit timeout. Output streams continuously through Pi's bounded bash output handling, and an explicit `timeout` remains available.
 - Cancellation sends `TERM` to the entire command process group and escalates to `KILL`; session shutdown also stops tracked foreground commands before resetting the runtime.
 
-The extension fails closed. If an enabled sandbox cannot initialize, `bash` and `!` are blocked instead of silently running on the host. `--no-sandbox` is the explicit emergency bypass.
+The extension fails closed. If the Process sandbox cannot initialize, `bash` and `!` are blocked instead of silently running on the host. The default backend mode is `auto`: it selects Apple Container only when its startup checks pass, otherwise warns and falls back to the Process sandbox. Forced `apple-container` mode blocks if those checks fail. `--no-sandbox` is the explicit emergency bypass.
+
+Choose a backend for one invocation with `pi --sandbox-mode auto|process|apple-container`. The flag overrides configuration; `/sandbox` shows both the requested and effective backends. See [`sandbox-apple-container.md`](sandbox-apple-container.md) for the check list and persistent configuration.
 
 ## External path authorization
 
@@ -178,7 +180,7 @@ Go 1.23+ prints a single `telemetry upload taken` warning on stderr when the tel
 
 Set `credentials.envVars` to `[]` only when a command intentionally needs inherited credentials. Prefer a narrowly allowed domain and the runtime's credential masking/injection configuration over exposing a token generally.
 
-Set `"enabled": false` in a trusted configuration, or start Pi with `--no-sandbox`, to use normal local bash explicitly.
+Set top-level `"enabled": false` in a trusted configuration, or start Pi with `--no-sandbox`, to use normal local bash explicitly. To retain sandboxing but skip VM isolation, use `pi --sandbox-mode process`.
 
 ## Long-running commands
 

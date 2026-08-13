@@ -5,8 +5,9 @@ import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { SANDBOX_TEMP_ROOT } from "./sandbox-paths.ts";
 import { errorMessage } from "./util.ts";
 
+export type SandboxBackendMode = "auto" | "process" | "apple-container";
+
 export interface AppleContainerConfig {
-  enabled: boolean;
   binary: string;
   image: string;
   platform: "linux/arm64";
@@ -20,6 +21,7 @@ export interface AppleContainerConfig {
 export interface SandboxConfig extends SandboxRuntimeConfig {
   enabled: boolean;
   isolation: {
+    mode: SandboxBackendMode;
     appleContainer: AppleContainerConfig;
   };
   /**
@@ -144,11 +146,11 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
     envVars: SENSITIVE_ENV_VARS.map((name) => ({ name, mode: "deny" as const })),
   },
   isolation: {
-    // Apple Container is an additional VM layer around the existing Process
-    // sandbox, never a replacement for it. It is opt-in until the local image
-    // has been built and the macOS container service is running.
+    // Auto-select the additional Apple VM layer when every prerequisite is
+    // available. Otherwise startup reports the failed check and safely falls
+    // back to the Process sandbox; it never falls back to an unsandboxed shell.
+    mode: "auto",
     appleContainer: {
-      enabled: false,
       binary: "/opt/homebrew/bin/container",
       image: "local/pi-sandbox-asrt:0.0.70",
       platform: "linux/arm64",
@@ -198,10 +200,21 @@ export function mergeSandboxConfig(
   }
   if (isRecord(overrides.isolation)) {
     const isolation = overrides.isolation;
-    if (isRecord(isolation.appleContainer)) {
+    const appleContainer = isRecord(isolation.appleContainer)
+      ? isolation.appleContainer
+      : undefined;
+    if (isolation.mode !== undefined) {
+      merged.isolation.mode = structuredClone(isolation.mode) as SandboxBackendMode;
+    } else if (appleContainer?.enabled !== undefined) {
+      // Compatibility with the original `isolation.appleContainer.enabled`
+      // setting. New configuration should use the backend domain concept.
+      merged.isolation.mode = legacyAppleContainerMode(appleContainer.enabled);
+    }
+    if (appleContainer !== undefined) {
+      const { enabled: _legacyEnabled, ...containerOverrides } = appleContainer;
       merged.isolation.appleContainer = {
         ...merged.isolation.appleContainer,
-        ...structuredClone(isolation.appleContainer),
+        ...structuredClone(containerOverrides),
       } as AppleContainerConfig;
     }
   }
@@ -238,6 +251,13 @@ export function loadSandboxConfig(
   }
 
   return { config, loadedFrom, warnings };
+}
+
+function legacyAppleContainerMode(value: unknown): SandboxBackendMode {
+  if (value === true) return "apple-container";
+  if (value === false) return "process";
+  if (value === "auto") return "auto";
+  return value as SandboxBackendMode;
 }
 
 function mergeSection(

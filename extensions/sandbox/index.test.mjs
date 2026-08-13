@@ -4,9 +4,14 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { defaultPiReadRoots, registerSandboxExtension } from "./index.ts";
+import {
+  defaultPiReadRoots,
+  registerSandboxExtension,
+  resolveSandboxBackendMode,
+} from "./index.ts";
 
 function createHarness(runtime, flags = {}, authorizationOptions) {
+  const effectiveFlags = { "sandbox-mode": "process", ...flags };
   const handlers = new Map();
   const commands = new Map();
   let bashTool;
@@ -17,7 +22,7 @@ function createHarness(runtime, flags = {}, authorizationOptions) {
   const pi = {
     registerFlag() {},
     getFlag(name) {
-      return flags[name] ?? false;
+      return effectiveFlags[name] ?? false;
     },
     registerTool(tool) {
       if (tool.name === "bash") bashTool = tool;
@@ -83,6 +88,23 @@ function createHarness(runtime, flags = {}, authorizationOptions) {
   };
 }
 
+function createAppleController({ preflightError } = {}) {
+  let preflights = 0;
+  return {
+    async preflight() {
+      preflights += 1;
+      if (preflightError) throw preflightError;
+    },
+    track() {},
+    release() {},
+    async forceDelete() {},
+    async stopAll() {},
+    preflightCount() {
+      return preflights;
+    },
+  };
+}
+
 function createRuntime({ initializeError } = {}) {
   let resets = 0;
   let networkAsk;
@@ -117,6 +139,69 @@ function createRuntime({ initializeError } = {}) {
     },
   };
 }
+
+test("sandbox backend mode resolves CLI overrides", () => {
+  assert.equal(resolveSandboxBackendMode(undefined, "auto"), "auto");
+  assert.equal(resolveSandboxBackendMode(undefined, "process"), "process");
+  assert.equal(resolveSandboxBackendMode("process", "auto"), "process");
+  assert.equal(resolveSandboxBackendMode("apple-container", "process"), "apple-container");
+  assert.throws(() => resolveSandboxBackendMode("vm", "auto"), /Invalid --sandbox-mode/);
+  assert.throws(() => resolveSandboxBackendMode(undefined, "vm"), /Invalid isolation\.mode/);
+});
+
+test("auto mode selects Apple Container when prerequisites pass", async () => {
+  const fake = createRuntime();
+  const controller = createAppleController();
+  const harness = createHarness(
+    fake.runtime,
+    { "sandbox-mode": "auto" },
+    { allowOsTemp: false, appleContainerController: controller },
+  );
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  assert.equal(controller.preflightCount(), 1);
+  assert.ok(harness.notifications.some(({ message }) => /Apple Container \+ Process sandbox initialized/.test(message)));
+  await harness.commands.get("sandbox")("", harness.ctx);
+  assert.match(harness.notifications.at(-1).message, /Requested backend: auto/);
+  assert.match(harness.notifications.at(-1).message, /Effective backend: apple-container/);
+});
+
+test("auto mode reports missing prerequisites and falls back to Process sandbox", async () => {
+  const fake = createRuntime();
+  const controller = createAppleController({
+    preflightError: new Error("container system status timed out after 12000ms"),
+  });
+  const harness = createHarness(
+    fake.runtime,
+    { "sandbox-mode": "auto" },
+    { allowOsTemp: false, appleContainerController: controller },
+  );
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  assert.match(harness.statuses.get("sandbox"), /sandbox on/);
+  assert.ok(harness.notifications.some(({ message, level }) => (
+    level === "warning"
+      && /timed out after 12000ms/.test(message)
+      && /Falling back to the Process sandbox/.test(message)
+  )));
+  await harness.commands.get("sandbox")("", harness.ctx);
+  assert.match(harness.notifications.at(-1).message, /Effective backend: process/);
+});
+
+test("forced Apple Container mode fails closed when prerequisites are missing", async () => {
+  const fake = createRuntime();
+  const controller = createAppleController({ preflightError: new Error("guest image is missing") });
+  const harness = createHarness(
+    fake.runtime,
+    { "sandbox-mode": "apple-container" },
+    { allowOsTemp: false, appleContainerController: controller },
+  );
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  assert.match(harness.statuses.get("sandbox"), /sandbox blocked/);
+  assert.equal(fake.resetCount(), 1);
+  assert.ok(harness.notifications.some(({ message }) => /guest image is missing/.test(message)));
+});
 
 test("unlisted network domains request approval once per session", async () => {
   const fake = createRuntime();

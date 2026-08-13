@@ -70,7 +70,7 @@ export async function createTransactionalWorkspace(
   transactionRoot: string,
 ): Promise<TransactionalWorkspace> {
   const original = await realpath(workspace);
-  await assertApfs(original);
+  await assertApfsPath(original);
   await mkdir(transactionRoot, { recursive: true, mode: 0o700 });
   const root = await mkdtemp(join(transactionRoot, "command-"));
   const staged = join(root, "workspace");
@@ -122,7 +122,7 @@ export function isWorkspaceChangeAllowed(
   );
 }
 
-async function assertApfs(path: string): Promise<void> {
+export async function assertApfsPath(path: string): Promise<void> {
   if (process.platform !== "darwin") {
     throw new Error("Transactional Apple Container workspaces require macOS APFS");
   }

@@ -20,7 +20,7 @@ The allowlist should stay narrow. New commands or flags require tests showing bo
 - Long foreground commands have no implicit timeout. Cancellation targets the process group and escalates from `TERM` to `KILL`; persistent daemonized descendants are not guaranteed to remain tracked.
 - Package and extension code execute outside this boundary. The authorized workspace remains writable and can still be damaged.
 - Project sandbox configuration is read only for trusted projects. Configuration can intentionally weaken or disable the policy, so review `.pi/sandbox.json` as code.
-- Use a container, VM, or dedicated low-privilege account when the sandbox-runtime boundary is insufficient. On macOS 26/Apple silicon, the experimental [`sandbox-apple-container.md`](sandbox-apple-container.md) mode runs commands under a guest Process sandbox inside an Apple lightweight VM with transactional APFS workspace reconciliation; it is opt-in and fails closed for unsupported grants. The trusted Apple CLI launcher cannot itself use Seatbelt because sandbox-exec breaks its XPC registration. See [`sandbox.md`](sandbox.md).
+- Use a container, VM, or dedicated low-privilege account when the sandbox-runtime boundary is insufficient. On macOS 26/Apple silicon, the experimental [`sandbox-apple-container.md`](sandbox-apple-container.md) mode runs commands under a guest Process sandbox inside an Apple lightweight VM with transactional APFS workspace reconciliation. Default `auto` selection checks prerequisites and reports any fallback to the Process sandbox; forced `apple-container` mode and unsupported grants fail closed. The trusted Apple CLI launcher cannot itself use Seatbelt because sandbox-exec breaks its XPC registration. See [`sandbox.md`](sandbox.md).
 
 ## Secrets
 
