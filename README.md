@@ -30,6 +30,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | 🧠 **External memory** | Opt-in synced-folder memory captured at compaction with two-stage recall |
 | 🔁 **Loop guard** | Detect repeated tool calls *or repeated output phrases* and interrupt stuck agent loops |
 | 🧭 **Workflow skill** | Concise default working guidelines |
+| ⚙️ **Automatic workflows** | Generate, preview, approve, execute, persist, and resume multi-step tasks |
 | 🧩 **Prompts** | On-demand review / debugging / architecture prompts |
 | 📚 **Docs** | Reference docs for exploration, external projects, and security |
 
@@ -38,6 +39,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | Path | Description |
 |---|---|
 | `extensions/plan-mode/` | Read-only planning mode |
+| `extensions/workflow/` | Automatically generated, persisted task workflows |
 | `extensions/markdown-viewer/` | Open and render local Markdown files in the Pi TUI |
 | `extensions/work-status/` | Show the current task and work type in the Pi TUI |
 | `extensions/btw/` | Ask temporary side questions without changing the main conversation |
@@ -151,7 +153,7 @@ pi list
 pi
 ```
 
-After Pi starts, use `/plan` to toggle planning mode.
+After Pi starts, use `/plan` to toggle planning mode. Multi-step tasks are automatically detected and shown as temporary workflow previews; approve the whole workflow before execution. Use `/workflow` to inspect, approve, pause, resume, or cancel the current workflow.
 
 ## 🧰 Usage
 

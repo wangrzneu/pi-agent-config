@@ -30,6 +30,7 @@
 | 🧠 **外部记忆** | 可选的项目级同步目录记忆，压缩时捕获、两阶段召回 |
 | 🔁 **循环守卫** | 检测重复的工具调用或重复的输出语句，打断卡住的 agent 循环 |
 | 🧭 **工作流 skill** | 精简的默认工作规范 |
+| ⚙️ **自动 Workflow** | 自动生成、预览、审批、执行、持久化并恢复多步骤任务 |
 | 🧩 **提示词** | 按需使用的 review / debugging / architecture 提示词 |
 | 📚 **文档** | 代码探索、外部项目与安全边界参考文档 |
 
@@ -38,6 +39,7 @@
 | 路径 | 说明 |
 |---|---|
 | `extensions/plan-mode/` | 只读规划模式 |
+| `extensions/workflow/` | 自动生成并持久化任务 Workflow |
 | `extensions/markdown-viewer/` | 在 Pi TUI 中打开并渲染本地 Markdown 文件 |
 | `extensions/work-status/` | 在 Pi TUI 中显示当前任务和工作类型 |
 | `extensions/btw/` | 临时提问，不改变主会话 |
@@ -145,7 +147,7 @@ pi list
 pi
 ```
 
-启动后使用 `/plan` 切换规划模式。
+启动后使用 `/plan` 切换规划模式。多步骤任务会自动识别并展示临时 Workflow 预览；整体批准后才会执行。使用 `/workflow` 查看、批准、暂停、恢复或取消当前 Workflow。
 
 ## 🧰 使用指南
 
