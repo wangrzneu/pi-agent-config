@@ -51,7 +51,8 @@ The startup selector, local and managed resolvers, immutable store, restricted
 tar.gz installer, and Kubernetes capability broker are implemented. Official
 manifests cover Go, Node.js, pnpm, and kubectl for supported Darwin/Linux and
 arm64/x64 targets; the pinned Python catalog uses checksum-verified Astral
-`python-build-standalone` archives. Runtime leases and automatic
+`python-build-standalone` archives for `3.11.11`, `3.12.9`, and `3.13.2`.
+Runtime leases and automatic
 quota/retention LRU pruning are active. Apple projects receive a persistent
 trusted-bootstrap Python venv and isolated pnpm store, and `/sandbox env`
 provides status, listing, and pruning commands.
@@ -432,8 +433,7 @@ Completed:
 
 Remaining:
 
-1. Continue cross-platform and failure-injection integration hardening.
-2. Expand the pinned relocatable Python catalog as additional versions are needed.
+- Continue cross-platform and failure-injection integration hardening.
 
 Recommended defaults are backend `auto`, install mode `ask`, globally shared
 read-only Runtime Objects, project Python/pnpm state, no Kubernetes context grant,

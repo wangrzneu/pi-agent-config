@@ -78,6 +78,39 @@ test("capability gateway confines tokens to one grant, namespace, and observe po
   }
 });
 
+test("capability gateway never accepts a non-loopback upstream", async () => {
+  const gateway = new KubernetesCapabilityGateway();
+  await gateway.start();
+  try {
+    assert.throws(
+      () => gateway.grant({
+        context: "proxy",
+        upstream: "http://169.254.169.254/latest/meta-data",
+        access: "observe",
+      }),
+      /loopback-only/,
+    );
+    assert.throws(
+      () => gateway.grant({
+        context: "proxy",
+        upstream: "http://10.0.0.5:6443",
+        access: "observe",
+      }),
+      /loopback-only/,
+    );
+    assert.throws(
+      () => gateway.grant({
+        context: "proxy",
+        upstream: "file:///etc/passwd",
+        access: "observe",
+      }),
+      /HTTP or HTTPS/,
+    );
+  } finally {
+    await gateway.stop();
+  }
+});
+
 test("RBAC grants pass mutation methods to the fixed loopback upstream", async () => {
   const upstream = http.createServer((_request, response) => {
     response.writeHead(201);

@@ -14,7 +14,7 @@ function response(body, url) {
   return result;
 }
 
-test("trusted catalog resolves exact Go, Node.js, and kubectl Linux arm64 artifacts", async () => {
+test("trusted catalog resolves exact runtime artifacts across platforms and profiles", async () => {
   const fetchImpl = async (url) => {
     const value = String(url);
     if (value.startsWith("https://go.dev/dl/")) {
@@ -106,6 +106,24 @@ test("trusted catalog resolves exact Go, Node.js, and kubectl Linux arm64 artifa
       stripComponents: 1,
       executable: "bin/python",
     },
+  );
+  for (const [version, targetSuffix] of [
+    ["3.11.11", "aarch64-unknown-linux-gnu"],
+    ["3.12.9", "aarch64-unknown-linux-gnu"],
+  ]) {
+    const manifest = await resolveTrustedRuntimeManifest("python", version, "linux-arm64", { fetch: fetchImpl });
+    assert.equal(
+      manifest.url,
+      `https://github.com/astral-sh/python-build-standalone/releases/download/20250212/cpython-${version}%2B20250212-${targetSuffix}-install_only_stripped.tar.gz`,
+    );
+  }
+  assert.equal(
+    (await resolveTrustedRuntimeManifest("python", "3.13.2", "darwin-arm64", { fetch: fetchImpl })).url,
+    "https://github.com/astral-sh/python-build-standalone/releases/download/20250212/cpython-3.13.2%2B20250212-aarch64-apple-darwin-install_only_stripped.tar.gz",
+  );
+  assert.equal(
+    (await resolveTrustedRuntimeManifest("python", "3.13.2", "linux-x64", { fetch: fetchImpl })).url,
+    "https://github.com/astral-sh/python-build-standalone/releases/download/20250212/cpython-3.13.2%2B20250212-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
   );
   assert.deepEqual(
     await resolveTrustedRuntimeManifest("pnpm", "10.6.0", "linux-arm64", { fetch: fetchImpl }),

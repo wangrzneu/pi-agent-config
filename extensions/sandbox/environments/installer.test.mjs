@@ -192,6 +192,36 @@ test("archive runtime installer enforces expanded-size and entry limits", async 
   });
 });
 
+test("raw runtime installer fails closed on HTTP errors and oversized downloads", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-runtime-installer-http-"));
+  const store = new EnvironmentStore(root);
+  const manifest = {
+    profile: "kubectl",
+    version: "1.32.3",
+    platform: "linux-arm64",
+    url: "http://127.0.0.1:1/kubectl",
+    sha256: "0".repeat(64),
+    executable: "kubectl",
+  };
+
+  await assert.rejects(installRawRuntime(store, manifest, {
+    allowInsecureLocalhost: true,
+    fetch: async () => new Response("gone", { status: 404 }),
+  }), /HTTP 404/);
+
+  await assert.rejects(installRawRuntime(store, manifest, {
+    allowInsecureLocalhost: true,
+    fetch: async () => {
+      const oversized = new Response("body");
+      Object.defineProperty(oversized, "headers", {
+        value: new Headers({ "content-length": "999999999" }),
+      });
+      return oversized;
+    },
+    maxDownloadBytes: 1024,
+  }), /exceeds 1024 bytes/);
+});
+
 test("raw runtime installer rejects digest mismatch and insecure remote URLs", async () => {
   const body = Buffer.from("not trusted");
   const root = await mkdtemp(join(tmpdir(), "pi-runtime-installer-reject-"));

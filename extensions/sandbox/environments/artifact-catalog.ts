@@ -12,6 +12,8 @@ const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const SHA256_DIGEST = /^[a-f0-9]{64}$/;
 const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
 const PYTHON_STANDALONE_RELEASES: Readonly<Record<string, string>> = {
+  "3.11.11": "20250212",
+  "3.12.9": "20250212",
   "3.13.2": "20250212",
 };
 
