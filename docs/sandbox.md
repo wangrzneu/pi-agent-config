@@ -43,11 +43,12 @@ Process mode also supports session-scoped Kubernetes context grants after select
 /sandbox kube                    # list active grants
 /sandbox kube revoke dev-admin
 /sandbox kube revoke-all
+/sandbox kube forget             # clear persisted context names (not credentials)
 ```
 
 The trusted host reads redacted context metadata and runs `kubectl proxy`; the sandbox receives only a TLS capability gateway and sanitized `KUBECONFIG`. Exec credential helpers require a separate confirmation. Access defaults to `observe` and the context's namespace. Real kubeconfig tokens, private keys, and helper output never enter the sandbox. Process uses loopback. Apple Container binds only the private Apple bridge interface, mounts the sanitized config read-only, and never opens a public listener.
 
-With an exact version, Apple Container can install missing Go, Python, Node.js, pnpm, and kubectl Linux/arm64 runtimes from hard-coded trusted catalogs. `install.mode` controls `ask|auto|never`. Downloads require HTTPS, verify official SHA-256 or npm SHA-512 integrity, use bounded traversal-safe extraction in a no-network sandboxed subprocess, and publish immutable content-addressed objects. Session leases protect active objects while configured quota and retention drive automatic LRU pruning. Pinned checksum-verified relocatable Python is supported; project guest venv bootstrap, project pnpm persistence, and store management commands remain subsequent slices. See [`sandbox-development-environments.md`](sandbox-development-environments.md) for the complete target behavior.
+With an exact version, Apple Container can install missing Go, Python, Node.js, pnpm, and kubectl Linux/arm64 runtimes from hard-coded trusted catalogs. `install.mode` controls `ask|auto|never`. Downloads require HTTPS, verify official SHA-256 or npm SHA-512 integrity, use bounded traversal-safe extraction in a no-network sandboxed subprocess, and publish immutable content-addressed objects. Session leases protect active objects while configured quota and retention drive automatic LRU pruning. Pinned checksum-verified relocatable Python is supported. Apple projects get a persistent trusted-bootstrap venv and isolated pnpm store; `/sandbox env status|list|prune` manages the shared runtime store. See [`sandbox-development-environments.md`](sandbox-development-environments.md) for the complete target behavior.
 
 ## External path authorization
 

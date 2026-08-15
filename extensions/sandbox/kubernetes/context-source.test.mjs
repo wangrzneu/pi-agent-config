@@ -39,6 +39,7 @@ test("context discovery returns metadata without credential material", async () 
       execCommand: "aws",
       execArgs: ["eks", "get-token"],
       execEnvironmentNames: [],
+      sourceFile: "/home/user/.kube/config",
     },
     {
       name: "production",
@@ -50,10 +51,29 @@ test("context discovery returns metadata without credential material", async () 
       execCommand: undefined,
       execArgs: undefined,
       execEnvironmentNames: undefined,
+      sourceFile: "/home/user/.kube/config",
     },
   ]);
   const serialized = JSON.stringify(result);
   assert.doesNotMatch(serialized, /real-production-token|private-key|secret-ca/);
+});
+
+test("context discovery identifies the exact source in merged kubeconfig inputs", async () => {
+  const calls = [];
+  const result = await discoverKubernetesContexts({
+    kubectl: "/usr/bin/kubectl",
+    env: { KUBECONFIG: "/kube/first:/kube/second" },
+    async run(_executable, args, env) {
+      calls.push({ args, source: env.KUBECONFIG });
+      if (args[1] === "view") return JSON.stringify(kubeconfig);
+      return env.KUBECONFIG === "/kube/first" ? "dev-admin\n" : "production\n";
+    },
+  });
+  assert.deepEqual(result.contexts.map(({ name, sourceFile }) => ({ name, sourceFile })), [
+    { name: "dev-admin", sourceFile: "/kube/first" },
+    { name: "production", sourceFile: "/kube/second" },
+  ]);
+  assert.equal(calls.length, 3);
 });
 
 test("context discovery rejects malformed and dangling context references", async () => {

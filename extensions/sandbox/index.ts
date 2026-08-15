@@ -40,6 +40,7 @@ import { installTrustedRuntime } from "./environments/artifact-catalog.ts";
 import { resolveLocalEnvironments } from "./environments/local-resolver.ts";
 import { resolveManagedEnvironmentPlan } from "./environments/managed-resolver.ts";
 import { createRestrictedArchiveExtractor } from "./environments/restricted-installer.ts";
+import { prepareAppleProjectState } from "./environments/project-state.ts";
 import {
   provisionManagedObjects,
   resolveProcessEnvironmentPlan as resolveProcessPlan,
@@ -50,6 +51,7 @@ import { EnvironmentStore, parseEnvironmentStoreSize } from "./environments/stor
 import type { EnvironmentPlan, RequestedEnvironment } from "./environments/types.ts";
 import { KubernetesCapabilityGateway } from "./kubernetes/capability-gateway.ts";
 import { discoverKubernetesContexts } from "./kubernetes/context-source.ts";
+import { KubernetesContextSelectionStore } from "./kubernetes/context-selection-store.ts";
 import { KubectlProxyBroker } from "./kubernetes/proxy-broker.ts";
 import {
   KubernetesSessionAccess,
@@ -103,9 +105,11 @@ export interface AuthorizationOptions {
   environmentStore?: EnvironmentStore;
   environmentSelector?: typeof selectDevelopmentEnvironments;
   runtimeInstaller?: typeof installTrustedRuntime;
+  projectStateRoot?: string;
   /** Test seams for session-scoped Kubernetes access. */
   kubernetesContextDiscovery?: typeof discoverKubernetesContexts;
   kubernetesAccessFactory?: () => Promise<KubernetesSessionAccess>;
+  kubernetesSelectionStore?: KubernetesContextSelectionStore;
 }
 
 export function resolveAppleContainerHostGateway(
@@ -172,6 +176,10 @@ export function registerSandboxExtension(
   const appleContainer = authorizationOptions.appleContainerController ?? new AppleContainerController();
   const environmentStore = authorizationOptions.environmentStore
     ?? new EnvironmentStore(join(getAgentDir(), "cache", "sandbox"));
+  const projectStateRoot = authorizationOptions.projectStateRoot
+    ?? join(getAgentDir(), "cache", "sandbox", "projects");
+  const kubernetesSelectionStore = authorizationOptions.kubernetesSelectionStore
+    ?? new KubernetesContextSelectionStore(join(getAgentDir(), "cache", "sandbox", "kubernetes-selections"));
   const piReadRoots = authorizationOptions.piReadRoots ?? defaultPiReadRoots();
   const authOptions = { ...authorizationOptions, piReadRoots };
   const readAuthorization = new SandboxPathAuthorization(authOptions);
@@ -352,7 +360,10 @@ export function registerSandboxExtension(
         activeEnvironmentPlan.env.KUBECONFIG = access.kubeconfigPath;
       }
     }
-    if (config.persistContextSelection) rememberedKubernetesContexts.add(contextName);
+    if (config.persistContextSelection) {
+      rememberedKubernetesContexts.add(contextName);
+      await kubernetesSelectionStore.save(ctx.cwd, [...rememberedKubernetesContexts]);
+    }
     ctx.ui.notify(
       `Authorized Kubernetes context for this session: ${contextName}\nAccess: ${config.defaultAccess}\nNamespaces: ${config.defaultNamespaces === "all" ? "all" : metadata.namespace ?? "default"}`,
       "info",
@@ -488,6 +499,16 @@ export function registerSandboxExtension(
       ctx.isProjectTrusted(),
     );
     for (const warning of loaded.warnings) ctx.ui.notify(warning, "warning");
+    rememberedKubernetesContexts.clear();
+    if (loaded.config.kubernetes.persistContextSelection) {
+      try {
+        for (const contextName of await kubernetesSelectionStore.load(ctx.cwd)) {
+          rememberedKubernetesContexts.add(contextName);
+        }
+      } catch (error) {
+        ctx.ui.notify(`Persisted Kubernetes context selection was ignored: ${errorMessage(error)}`, "warning");
+      }
+    }
 
     if (!loaded.config.enabled) {
       state = { mode: "bypass", reason: "disabled by configuration", loaded };
@@ -587,10 +608,12 @@ export function registerSandboxExtension(
             approveInstall: approveManagedInstall,
           });
         }
-        return (authorizationOptions.managedEnvironmentResolver ?? resolveManagedEnvironmentPlan)(
+        const plan = await (authorizationOptions.managedEnvironmentResolver ?? resolveManagedEnvironmentPlan)(
           requestedEnvironments,
           { store: environmentStore, platform: "linux-arm64" },
         );
+        await prepareAppleProjectState(plan, { workspace: ctx.cwd, root: projectStateRoot });
+        return plan;
       };
 
       let processEnvironmentPlan: EnvironmentPlan | undefined;
@@ -739,8 +762,36 @@ export function registerSandboxExtension(
         await ctx.reload();
         return;
       }
+      if (trimmed.toLowerCase() === "env status" || trimmed.toLowerCase() === "env list") {
+        const storeStatus = await environmentStore.status();
+        ctx.ui.notify(formatEnvironmentStoreStatus(
+          storeStatus,
+          trimmed.toLowerCase() === "env list",
+        ), "info");
+        return;
+      }
+      if (trimmed.toLowerCase() === "env prune" || trimmed.toLowerCase() === "env prune --all") {
+        const config = state.loaded?.config.developmentEnvironments.install;
+        if (!config) throw new Error("Environment pruning requires loaded sandbox configuration");
+        const removeAll = trimmed.toLowerCase().endsWith("--all");
+        const result = await environmentStore.prune({
+          maxBytes: removeAll ? 0 : parseEnvironmentStoreSize(config.maxSize),
+          retentionDays: removeAll ? 0 : config.retentionDays,
+        });
+        ctx.ui.notify(
+          `Environment store pruned ${result.removedDigests.length} inactive object(s); ${formatBytes(result.bytesAfter)} remain.`,
+          "info",
+        );
+        return;
+      }
       if (trimmed.toLowerCase() === "kube") {
         ctx.ui.notify(formatKubernetesGrants(kubernetesAccess?.list() ?? []), "info");
+        return;
+      }
+      if (trimmed.toLowerCase() === "kube forget") {
+        rememberedKubernetesContexts.clear();
+        await kubernetesSelectionStore.clear(ctx.cwd);
+        ctx.ui.notify("Forgot persisted Kubernetes context selections for this project.", "info");
         return;
       }
       if (trimmed.toLowerCase() === "kube revoke-all") {
@@ -815,6 +866,39 @@ function setStatus(ctx: ExtensionContext, state: SandboxState): void {
       ? ctx.ui.theme.fg("error", " sandbox blocked")
       : ctx.ui.theme.fg("warning", " sandbox off");
   ctx.ui.setStatus(STATUS_KEY, status);
+}
+
+function formatEnvironmentStoreStatus(
+  status: Awaited<ReturnType<EnvironmentStore["status"]>>,
+  detailed: boolean,
+): string {
+  const lines = [
+    "Environment store",
+    `  Objects: ${status.objects}`,
+    `  Size: ${formatBytes(status.bytes)}`,
+    `  Leased: ${status.leasedObjects}`,
+  ];
+  if (detailed) {
+    lines.push("  Installed:");
+    if (status.installed.length === 0) lines.push("    (none)");
+    for (const entry of status.installed) {
+      lines.push(
+        `    ${entry.profile}@${entry.version} (${entry.platform}, ${formatBytes(entry.bytes)}${entry.leased ? ", active" : ""})`,
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
+function formatBytes(bytes: number): string {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${unit === 0 ? value : value.toFixed(value >= 10 ? 1 : 2)} ${units[unit]}`;
 }
 
 function formatState(

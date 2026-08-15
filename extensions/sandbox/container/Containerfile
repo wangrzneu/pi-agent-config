@@ -24,10 +24,10 @@ WORKDIR /opt/pi-sandbox
 COPY package.json package-lock.json /opt/pi-sandbox/
 RUN npm ci --omit=dev --no-audit --no-fund \
   && npm cache clean --force \
-  && mkdir -p /opt/pi-runner /opt/pi-kube \
+  && mkdir -p /opt/pi-runner /opt/pi-kube /var/pi-cache /var/pi-env \
   && mv /usr/local/bin/node /opt/pi-runner/node \
   && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
-COPY guest-runner.mjs /opt/pi-sandbox/guest-runner.mjs
+COPY guest-runner.mjs guest-bootstrap.mjs /opt/pi-sandbox/
 
 ENTRYPOINT ["/opt/pi-runner/node", "/opt/pi-sandbox/guest-runner.mjs"]

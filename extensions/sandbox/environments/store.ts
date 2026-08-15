@@ -18,6 +18,23 @@ import { basename, join, relative, resolve } from "node:path";
 const SAFE_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/;
 const SHA256_DIGEST = /^[a-f0-9]{64}$/;
 
+export interface InstalledEnvironmentObject {
+  platform: string;
+  profile: string;
+  version: string;
+  digest: string;
+  bytes: number;
+  leased: boolean;
+  lastUsed: Date;
+}
+
+export interface EnvironmentStoreStatus {
+  objects: number;
+  bytes: number;
+  leasedObjects: number;
+  installed: InstalledEnvironmentObject[];
+}
+
 export interface EnvironmentPruneOptions {
   maxBytes: number;
   retentionDays: number;
@@ -133,6 +150,53 @@ export class EnvironmentStore {
     const now = new Date();
     await utimes(refPath, now, now).catch(() => undefined);
     return objectPath;
+  }
+
+  async status(): Promise<EnvironmentStoreStatus> {
+    await this.initialize();
+    const [references, leasedDigests, objects] = await Promise.all([
+      this.readReferences(),
+      this.readActiveLeaseDigests(),
+      this.readObjects(),
+    ]);
+    const objectsByDigest = new Map(objects.map((object) => [object.digest, object]));
+    const installed: InstalledEnvironmentObject[] = [];
+    for (const reference of references) {
+      const relativePath = relative(this.refsRoot, reference.path);
+      const segments = relativePath.split(/[\\/]/);
+      if (segments.length !== 3 || !segments[2].endsWith(".json")) continue;
+      const [platform, profile, versionFile] = segments;
+      const version = versionFile.slice(0, -".json".length);
+      try {
+        validateSegment("platform", platform);
+        validateSegment("profile", profile);
+        validateSegment("version", version);
+      } catch {
+        continue;
+      }
+      const object = objectsByDigest.get(reference.digest);
+      if (!object) continue;
+      installed.push({
+        platform,
+        profile,
+        version,
+        digest: reference.digest,
+        bytes: object.bytes,
+        leased: leasedDigests.has(reference.digest),
+        lastUsed: new Date(Math.max(reference.mtimeMs, object.mtimeMs)),
+      });
+    }
+    installed.sort((left, right) => (
+      left.platform.localeCompare(right.platform)
+      || left.profile.localeCompare(right.profile)
+      || left.version.localeCompare(right.version)
+    ));
+    return {
+      objects: objects.length,
+      bytes: objects.reduce((sum, object) => sum + object.bytes, 0),
+      leasedObjects: objects.filter((object) => leasedDigests.has(object.digest)).length,
+      installed,
+    };
   }
 
   async acquireLease(

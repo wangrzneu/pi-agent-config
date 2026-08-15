@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { homedir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -21,6 +23,7 @@ export interface KubernetesContextMetadata {
   execCommand?: string;
   execArgs?: string[];
   execEnvironmentNames?: string[];
+  sourceFile?: string;
 }
 
 export interface KubernetesContextDiscovery {
@@ -45,6 +48,10 @@ export async function discoverKubernetesContexts(
   const clusters = namedEntries(config.clusters);
   const users = namedEntries(config.users);
   const contexts = namedEntries(config.contexts);
+  const sourceFiles = kubeconfigSourceFiles(options.env);
+  const sourceByContext = sourceFiles.length <= 1
+    ? new Map(contexts.map((context) => [context.name, sourceFiles[0]]))
+    : await contextSourceMap(options, run, sourceFiles);
 
   const discovered = contexts.map(({ name, value }) => {
     const context = recordProperty(value, "context");
@@ -69,6 +76,7 @@ export async function discoverKubernetesContexts(
       execCommand: authentication.execCommand,
       execArgs: authentication.execArgs,
       execEnvironmentNames: authentication.execEnvironmentNames,
+      sourceFile: sourceByContext.get(name),
     } satisfies KubernetesContextMetadata;
   });
 
@@ -76,6 +84,41 @@ export async function discoverKubernetesContexts(
     currentContext: optionalStringProperty(config, "current-context"),
     contexts: discovered,
   };
+}
+
+function kubeconfigSourceFiles(env: NodeJS.ProcessEnv): string[] {
+  const raw = env.KUBECONFIG;
+  const entries = raw === undefined
+    ? [join(homedir(), ".kube", "config")]
+    : raw.split(delimiter).filter(Boolean).map((path) => resolve(path));
+  for (const path of entries) {
+    if (/[\p{Cc}]/u.test(path)) {
+      throw new Error("KUBECONFIG contains an invalid source path");
+    }
+  }
+  return [...new Set(entries)];
+}
+
+async function contextSourceMap(
+  options: KubernetesContextSourceOptions,
+  run: NonNullable<KubernetesContextSourceOptions["run"]>,
+  sourceFiles: string[],
+): Promise<Map<string, string>> {
+  const sources = new Map<string, string>();
+  for (const sourceFile of sourceFiles) {
+    const output = await run(
+      options.kubectl,
+      ["config", "get-contexts", "-o", "name"],
+      { ...options.env, KUBECONFIG: sourceFile },
+    );
+    for (const contextName of output.split(/\r?\n/).filter(Boolean)) {
+      if (/^[\s]|[\0\r\n]/.test(contextName) || contextName !== contextName.trim()) {
+        throw new Error("kubectl config get-contexts returned an invalid context name");
+      }
+      if (!sources.has(contextName)) sources.set(contextName, sourceFile);
+    }
+  }
+  return sources;
 }
 
 async function runCommand(

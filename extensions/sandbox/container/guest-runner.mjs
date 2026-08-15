@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
+import { bootstrapGuestEnvironment } from "./guest-bootstrap.mjs";
 
 const decisions = new Map();
 let nextRequestId = 1;
@@ -42,6 +43,7 @@ async function execute(request) {
   process.chdir(request.cwd);
 
   await SandboxManager.initialize(request.policy, authorizeNetwork);
+  await bootstrapGuestEnvironment(request.bootstrap, (argv) => runSandboxedBootstrap(argv, request, safeEnvironment));
   const wrapped = await SandboxManager.wrapWithSandboxArgv(
     request.command,
     request.shell ?? "/bin/bash",
@@ -66,6 +68,39 @@ async function execute(request) {
   await SandboxManager.reset();
   send({ type: "exit", exitCode });
   finish(typeof exitCode === "number" ? exitCode : 1);
+}
+
+async function runSandboxedBootstrap(argv, request, safeEnvironment) {
+  const command = argv.map(shellQuote).join(" ");
+  const wrapped = await SandboxManager.wrapWithSandboxArgv(
+    command,
+    request.shell ?? "/bin/bash",
+    undefined,
+    undefined,
+    request.cwd,
+  );
+  let stderr = "";
+  activeChild = spawn(wrapped.argv[0], wrapped.argv.slice(1), {
+    cwd: request.cwd,
+    env: { ...safeEnvironment, ...wrapped.env },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  activeChild.stderr.on("data", (chunk) => {
+    stderr = `${stderr}${chunk.toString("utf8")}`.slice(-8_192);
+  });
+  const exitCode = await new Promise((resolve, reject) => {
+    activeChild.once("error", reject);
+    activeChild.once("close", resolve);
+  });
+  SandboxManager.cleanupAfterCommand();
+  activeChild = undefined;
+  if (exitCode !== 0) {
+    throw new Error(`Guest environment bootstrap failed (${exitCode}): ${stderr.trim()}`);
+  }
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
 }
 
 input.on("line", (line) => {

@@ -12,6 +12,7 @@ import {
   resolveSandboxBackendMode,
 } from "./index.ts";
 import { EnvironmentStore } from "./environments/store.ts";
+import { KubernetesContextSelectionStore } from "./kubernetes/context-selection-store.ts";
 
 function createHarness(runtime, flags = {}, authorizationOptions) {
   const effectiveFlags = { "sandbox-mode": "process", ...flags };
@@ -76,11 +77,16 @@ function createHarness(runtime, flags = {}, authorizationOptions) {
     },
   };
 
+  const kubernetesSelectionStore = new KubernetesContextSelectionStore(
+    join(tmpdir(), `pi-index-test-kube-selections-${randomUUID()}`),
+  );
   registerSandboxExtension(
     pi,
     runtime,
     {
       environmentStore: new EnvironmentStore(join(tmpdir(), `pi-index-test-store-${randomUUID()}`)),
+      projectStateRoot: join(tmpdir(), `pi-index-test-projects-${randomUUID()}`),
+      kubernetesSelectionStore,
       ...(authorizationOptions ?? { allowOsTemp: false }),
     },
   );
@@ -94,6 +100,7 @@ function createHarness(runtime, flags = {}, authorizationOptions) {
     statuses,
     notifications,
     confirmations,
+    kubernetesSelectionStore,
   };
 }
 
@@ -443,6 +450,10 @@ test("Kubernetes startup selection and /sandbox kube select inject a revocable s
   const bin = join(root, "bin");
   await mkdir(bin);
   await writeFile(join(bin, "kubectl"), "#!/bin/sh\n", { mode: 0o755 });
+  await mkdir(join(root, ".pi"));
+  await writeFile(join(root, ".pi", "sandbox.json"), JSON.stringify({
+    kubernetes: { persistContextSelection: true },
+  }));
   const kubeconfigPath = join(root, "sanitized-config.json");
   const grants = [];
   const fakeAccess = {
@@ -496,10 +507,12 @@ test("Kubernetes startup selection and /sandbox kube select inject a revocable s
     },
     async kubernetesAccessFactory() { return fakeAccess; },
   });
+  harness.ctx.cwd = root;
   harness.ctx.ui.select = async () => "dev-admin";
   await harness.handlers.get("session_start")({ reason: "startup" }, harness.ctx);
 
   assert.equal(grants.length, 1, JSON.stringify(harness.notifications));
+  assert.deepEqual(await harness.kubernetesSelectionStore.load(root), ["dev-admin"]);
   assert.equal(grants[0].access, "observe");
   assert.match(
     harness.confirmations.at(-1).message,
@@ -523,6 +536,8 @@ test("Kubernetes startup selection and /sandbox kube select inject a revocable s
   assert.equal(grants.length, 0);
   await harness.commands.get("sandbox")("kube select dev-admin", harness.ctx);
   assert.equal(grants.length, 1);
+  await harness.commands.get("sandbox")("kube forget", harness.ctx);
+  assert.deepEqual(await harness.kubernetesSelectionStore.load(root), []);
 });
 
 test("OS temp paths are readable from outside the workspace by default", async () => {
@@ -931,6 +946,19 @@ test("host execution requires a TUI approval channel for a new word", async () =
     ),
     /echo operations require interactive approval/,
   );
+});
+
+test("/sandbox env status, list, and prune expose safe store management", async () => {
+  const fake = createRuntime();
+  const harness = createHarness(fake.runtime);
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  await harness.commands.get("sandbox")("env status", harness.ctx);
+  assert.match(harness.notifications.at(-1).message, /Environment store.*Objects: 0/s);
+  await harness.commands.get("sandbox")("env list", harness.ctx);
+  assert.match(harness.notifications.at(-1).message, /Installed:\n    \(none\)/);
+  await harness.commands.get("sandbox")("env prune --all", harness.ctx);
+  assert.match(harness.notifications.at(-1).message, /pruned 0 inactive object/);
 });
 
 test("/sandbox allow-read grants a path for the session", async () => {

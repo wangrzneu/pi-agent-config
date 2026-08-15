@@ -52,8 +52,9 @@ tar.gz installer, and Kubernetes capability broker are implemented. Official
 manifests cover Go, Node.js, pnpm, and kubectl for supported Darwin/Linux and
 arm64/x64 targets; the pinned Python catalog uses checksum-verified Astral
 `python-build-standalone` archives. Runtime leases and automatic
-quota/retention LRU pruning are active. Project guest venv bootstrap, project
-pnpm state, and environment management commands remain.
+quota/retention LRU pruning are active. Apple projects receive a persistent
+trusted-bootstrap Python venv and isolated pnpm store, and `/sandbox env`
+provides status, listing, and pruning commands.
 
 ## Domain model
 
@@ -431,10 +432,9 @@ Completed:
 
 Remaining:
 
-1. Project guest venv bootstrap.
-2. Project pnpm store persistence.
-3. Persisted (non-grant) Kubernetes context selection when explicitly enabled.
-4. Environment management commands and final integration hardening.
+1. Split the environment and Kubernetes session controllers out of the extension entrypoint.
+2. Surface exact source-file metadata for contexts assembled from multiple kubeconfigs.
+3. Continue cross-platform and failure-injection integration hardening.
 
 Recommended defaults are backend `auto`, install mode `ask`, globally shared
 read-only Runtime Objects, project Python/pnpm state, no Kubernetes context grant,

@@ -80,6 +80,11 @@ test("leases protect active objects while quota pruning removes least-recently-u
   }
 
   await store.acquireLease("session-one", "linux-arm64", "go", "1.24.2");
+  const status = await store.status();
+  assert.equal(status.objects, 2);
+  assert.equal(status.installed.length, 2);
+  assert.equal(status.leasedObjects, 1);
+  assert.equal(status.installed.find((entry) => entry.profile === "go").leased, true);
   const first = await store.prune({ maxBytes: 0, retentionDays: 3650 });
   assert.deepEqual(first.removedDigests, ["c".repeat(64)]);
   assert.ok(await store.resolve("linux-arm64", "go", "1.24.2"));

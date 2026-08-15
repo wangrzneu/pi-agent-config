@@ -119,6 +119,7 @@ export function createAppleContainerBashOperations(
         shell: options.container.shell,
         env: guestEnv,
         policy: guestPolicy,
+        bootstrap: environmentPlan?.guestBootstrap,
       };
       const args = buildContainerRunArgs({
         config: options.container,
@@ -373,6 +374,15 @@ function guestCodingEnvironment(
     if (typeof value === "string" && value.startsWith(join(SANDBOX_TEMP_ROOT, "cache"))) {
       guest[name] = value.replace(join(SANDBOX_TEMP_ROOT, "cache"), GUEST_CACHE_ROOT);
     }
+  }
+  for (const name of [
+    "VIRTUAL_ENV",
+    "PNPM_HOME",
+    "npm_config_store_dir",
+    "pnpm_config_store_dir",
+  ]) {
+    const value = developmentEnvironment?.[name];
+    if (typeof value === "string" && value.startsWith("/var/pi-env/")) guest[name] = value;
   }
   return guest;
 }

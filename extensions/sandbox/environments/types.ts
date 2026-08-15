@@ -25,6 +25,13 @@ export interface EnvironmentMount {
   readonly: boolean;
 }
 
+export interface GuestEnvironmentBootstrap {
+  pythonVenv?: {
+    runtime: string;
+    venv: string;
+  };
+}
+
 export interface EnvironmentPlan {
   backend: EnvironmentBackend;
   platform: string;
@@ -32,4 +39,5 @@ export interface EnvironmentPlan {
   env: Record<string, string | undefined>;
   allowRead: string[];
   mounts?: EnvironmentMount[];
+  guestBootstrap?: GuestEnvironmentBootstrap;
 }
