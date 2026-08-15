@@ -7,6 +7,7 @@ import {
   buildContainerRunArgs,
   captureCommand,
   compileGuestPolicy,
+  guestCodingEnvironment,
   validateAppleContainerConfig,
 } from "./apple-container.ts";
 import { DEFAULT_SANDBOX_CONFIG, mergeSandboxConfig } from "./config.ts";
@@ -18,6 +19,20 @@ import {
 } from "./transactional-workspace.ts";
 
 const containerConfig = DEFAULT_SANDBOX_CONFIG.isolation.appleContainer;
+
+test("Apple guest project state overrides process-scoped pnpm cache defaults", () => {
+  const environment = guestCodingEnvironment({}, undefined, {
+    PATH: "/var/pi-env/python/bin:/usr/bin:/bin",
+    VIRTUAL_ENV: "/var/pi-env/python",
+    PNPM_HOME: "/var/pi-env/pnpm-home",
+    npm_config_store_dir: "/var/pi-env/pnpm-store",
+    pnpm_config_store_dir: "/var/pi-env/pnpm-store",
+  });
+  assert.equal(environment.VIRTUAL_ENV, "/var/pi-env/python");
+  assert.equal(environment.PNPM_HOME, "/var/pi-env/pnpm-home");
+  assert.equal(environment.npm_config_store_dir, "/var/pi-env/pnpm-store");
+  assert.equal(environment.pnpm_config_store_dir, "/var/pi-env/pnpm-store");
+});
 
 test("Apple Container isolation defaults to auto and merges without replacing defaults", () => {
   assert.equal(DEFAULT_SANDBOX_CONFIG.isolation.mode, "auto");

@@ -355,7 +355,7 @@ export function compileGuestPolicy(
   };
 }
 
-function guestCodingEnvironment(
+export function guestCodingEnvironment(
   env: NodeJS.ProcessEnv,
   identity?: GitIdentity,
   developmentEnvironment?: NodeJS.ProcessEnv,

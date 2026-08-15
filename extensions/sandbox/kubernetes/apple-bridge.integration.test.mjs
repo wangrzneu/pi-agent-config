@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { DEFAULT_SANDBOX_CONFIG } from "../config.ts";
-import { resolveAppleContainerHostGateway } from "../index.ts";
+import { resolveAppleContainerHostGateway } from "./apple-bridge.ts";
 import { ensureSandboxTempRoot, SANDBOX_TEMP_ROOT } from "../sandbox-paths.ts";
 import { KubernetesCapabilityGateway } from "./capability-gateway.ts";
 import { createKubernetesGatewayTlsMaterial } from "./tls-material.ts";

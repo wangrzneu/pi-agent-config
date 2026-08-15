@@ -432,9 +432,8 @@ Completed:
 
 Remaining:
 
-1. Split the environment and Kubernetes session controllers out of the extension entrypoint.
-2. Surface exact source-file metadata for contexts assembled from multiple kubeconfigs.
-3. Continue cross-platform and failure-injection integration hardening.
+1. Continue cross-platform and failure-injection integration hardening.
+2. Expand the pinned relocatable Python catalog as additional versions are needed.
 
 Recommended defaults are backend `auto`, install mode `ask`, globally shared
 read-only Runtime Objects, project Python/pnpm state, no Kubernetes context grant,
