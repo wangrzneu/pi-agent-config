@@ -34,7 +34,14 @@ integrationTest("Apple Container + host/guest Process sandboxes enforce end-to-e
   };
   config.filesystem.allowRead = [workspace, SANDBOX_TEMP_ROOT, "/System", "/usr", "/bin", "/sbin", "/Library", "/opt/homebrew", "/private/etc", "/etc", "/dev", "/var", "/private/var", "/tmp", "/private/tmp"];
   config.filesystem.allowWrite = [".", workspace, SANDBOX_TEMP_ROOT, tmpdir(), "/tmp", "/private/tmp"];
-  const { enabled: _enabled, isolation: _isolation, hostExec: _hostExec, ...runtimeConfig } = config;
+  const {
+    enabled: _enabled,
+    isolation: _isolation,
+    hostExec: _hostExec,
+    developmentEnvironments: _developmentEnvironments,
+    kubernetes: _kubernetes,
+    ...runtimeConfig
+  } = config;
 
   await ensureSandboxTempRoot();
   await writeFile(join(workspace, "existing.txt"), "before");

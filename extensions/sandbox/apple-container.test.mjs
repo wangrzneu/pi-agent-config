@@ -78,6 +78,22 @@ test("container launch plan is ephemeral, root-read-only, and uses bind mounts i
   assert.ok(args.includes("type=bind,source=/Users/test/reference,target=/Users/test/reference,readonly"));
 });
 
+test("container launch plan mounts resolved development environments with explicit modes", () => {
+  const args = buildContainerRunArgs({
+    config: containerConfig,
+    name: "pi-sbx-env",
+    workspaceSource: "/tmp/pi-stage/workspace",
+    workspaceTarget: "/Users/test/project",
+    readMounts: [],
+    environmentMounts: [
+      { source: "/host/toolchains/go", target: "/opt/pi-toolchains/go/1.24.2", readonly: true },
+      { source: "/host/env/python", target: "/var/pi-env/python", readonly: false },
+    ],
+  });
+  assert.ok(args.includes("type=bind,source=/host/toolchains/go,target=/opt/pi-toolchains/go/1.24.2,readonly"));
+  assert.ok(args.includes("type=bind,source=/host/env/python,target=/var/pi-env/python"));
+});
+
 test("guest Process policy preserves network rules and compiles Linux filesystem roots", () => {
   const policy = compileGuestPolicy(DEFAULT_SANDBOX_CONFIG, "/workspace", ["/reference"]);
   assert.deepEqual(policy.network.allowedDomains, DEFAULT_SANDBOX_CONFIG.network.allowedDomains);
@@ -87,6 +103,24 @@ test("guest Process policy preserves network rules and compiles Linux filesystem
   assert.ok(policy.filesystem.allowRead.includes("/usr"));
   assert.ok(policy.filesystem.allowWrite.includes("/workspace"));
   assert.equal(policy.enableWeakerNestedSandbox, false);
+});
+
+test("guest policy grants exact environment roots and only declared writable mounts", () => {
+  const policy = compileGuestPolicy(DEFAULT_SANDBOX_CONFIG, "/workspace", [], {
+    backend: "apple-container",
+    platform: "linux-arm64",
+    profiles: [],
+    env: {},
+    allowRead: ["/opt/pi-toolchains/go/1.24.2"],
+    mounts: [
+      { source: "/host/go", target: "/opt/pi-toolchains/go/1.24.2", readonly: true },
+      { source: "/host/python-env", target: "/var/pi-env/python", readonly: false },
+    ],
+  });
+  assert.ok(policy.filesystem.allowRead.includes("/opt/pi-toolchains/go/1.24.2"));
+  assert.ok(policy.filesystem.allowRead.includes("/var/pi-env/python"));
+  assert.ok(policy.filesystem.allowWrite.includes("/var/pi-env/python"));
+  assert.equal(policy.filesystem.allowWrite.includes("/opt/pi-toolchains/go/1.24.2"), false);
 });
 
 test("workspace policy blocks configured and mandatory protected paths", () => {

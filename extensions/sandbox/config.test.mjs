@@ -40,6 +40,64 @@ test("runtime passthrough options can be overridden by configuration", () => {
   assert.equal(config.enableWeakerNetworkIsolation, false);
 });
 
+test("development environment defaults are secure and composable", () => {
+  assert.deepEqual(DEFAULT_SANDBOX_CONFIG.developmentEnvironments.selected, []);
+  assert.equal(DEFAULT_SANDBOX_CONFIG.developmentEnvironments.install.mode, "ask");
+  assert.equal(DEFAULT_SANDBOX_CONFIG.developmentEnvironments.profiles.pnpm.storeScope, "project");
+  assert.equal(DEFAULT_SANDBOX_CONFIG.kubernetes.defaultAccess, "observe");
+  assert.equal(DEFAULT_SANDBOX_CONFIG.kubernetes.persistContextSelection, false);
+  assert.equal(DEFAULT_SANDBOX_CONFIG.kubernetes.credentialMode, "host-broker");
+});
+
+test("development environment configuration deep-merges profiles and replaces selections", () => {
+  const config = mergeSandboxConfig(DEFAULT_SANDBOX_CONFIG, {
+    developmentEnvironments: {
+      selected: ["node", "pnpm"],
+      install: { mode: "never" },
+      profiles: {
+        node: { version: "22.14.0" },
+        pnpm: { version: "10.6.0", storeScope: "global" },
+      },
+    },
+    kubernetes: { defaultAccess: "rbac" },
+  });
+
+  assert.deepEqual(config.developmentEnvironments.selected, ["node", "pnpm"]);
+  assert.equal(config.developmentEnvironments.install.mode, "never");
+  assert.equal(config.developmentEnvironments.install.maxSize, "5g");
+  assert.equal(config.developmentEnvironments.profiles.node.version, "22.14.0");
+  assert.equal(config.developmentEnvironments.profiles.node.source, "auto");
+  assert.equal(config.developmentEnvironments.profiles.pnpm.version, "10.6.0");
+  assert.equal(config.developmentEnvironments.profiles.pnpm.storeScope, "global");
+  assert.equal(config.developmentEnvironments.profiles.go.source, "auto");
+  assert.equal(config.kubernetes.defaultAccess, "rbac");
+  assert.equal(config.kubernetes.credentialMode, "host-broker");
+});
+
+test("invalid install and Kubernetes access modes never become permissive", () => {
+  assert.throws(() => mergeSandboxConfig(DEFAULT_SANDBOX_CONFIG, {
+    developmentEnvironments: { install: { mode: "aks" } },
+  }), /developmentEnvironments\.install\.mode/);
+  assert.throws(() => mergeSandboxConfig(DEFAULT_SANDBOX_CONFIG, {
+    kubernetes: { defaultAccess: "admin" },
+  }), /kubernetes\.defaultAccess/);
+});
+
+test("invalid security configuration is ignored with a warning", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandbox-config-invalid-security-"));
+  const agentDir = join(root, "agent");
+  const globalDir = join(agentDir, "extensions");
+  await mkdir(globalDir, { recursive: true });
+  await writeFile(join(globalDir, "sandbox.json"), JSON.stringify({
+    kubernetes: { defaultAccess: "admin" },
+  }));
+
+  const loaded = loadSandboxConfig(root, agentDir, ".pi", true);
+  assert.equal(loaded.config.kubernetes.defaultAccess, "observe");
+  assert.equal(loaded.loadedFrom.length, 0);
+  assert.match(loaded.warnings.join("\n"), /kubernetes\.defaultAccess/);
+});
+
 test("trusted project config takes precedence over global config", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-sandbox-config-"));
   const agentDir = join(root, "agent");

@@ -36,6 +36,23 @@ test("coding caches are redirected into a writable process-scoped temp area", ()
   assert.match(env.GOPATH, /pi-sandbox-\d+-[0-9a-f-]+\/cache\/go-path$/);
 });
 
+test("selected development environments are merged before sandbox-owned cache overrides", () => {
+  const env = codingCacheEnvironment(
+    { PATH: "/bin", PYTHONPATH: "/host/packages", GOCACHE: "/host/go-cache" },
+    undefined,
+    {
+      PATH: "/managed/python/bin:/managed/go/bin:/bin",
+      PYTHONPATH: undefined,
+      GOCACHE: "/profile/go-cache",
+    },
+  );
+
+  assert.equal(env.PATH, "/managed/python/bin:/managed/go/bin:/bin");
+  assert.equal(env.PYTHONPATH, undefined);
+  assert.notEqual(env.GOCACHE, "/profile/go-cache");
+  assert.match(env.GOCACHE, /pi-sandbox-\d+-[0-9a-f-]+\/cache\/go-build$/);
+});
+
 test("sandboxed bash injects the git author identity into the child", async () => {
   const fake = createRuntime();
   const operations = createSandboxedBashOperations(

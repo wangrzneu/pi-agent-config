@@ -15,6 +15,7 @@ import {
   reconcileTransactionalWorkspace,
 } from "./transactional-workspace.ts";
 import type { GitIdentity } from "./git-identity.ts";
+import type { EnvironmentMount, EnvironmentPlan } from "./environments/types.ts";
 
 const GUEST_CACHE_ROOT = "/var/pi-cache";
 const TRANSACTION_ROOT = join(SANDBOX_TEMP_ROOT, "transactions");
@@ -33,6 +34,7 @@ export interface AppleContainerOperationsOptions {
   policy: () => AppleContainerPolicySource;
   gitIdentity: () => GitIdentity | undefined;
   authorizeNetwork: (host: string, port?: number) => Promise<boolean>;
+  environment?: () => EnvironmentPlan | undefined;
 }
 
 export interface AppleContainerLifecycle {
@@ -98,12 +100,18 @@ export function createAppleContainerBashOperations(
         );
       }
       const readMounts = await inspectReadGrantDirectories(source.readGrants, cwd);
+      const environmentPlan = options.environment?.();
+      const environmentMounts = environmentPlan?.mounts ?? [];
       const transaction = await createTransactionalWorkspace(cwd, TRANSACTION_ROOT);
       const name = `pi-sbx-${process.pid}-${randomUUID().slice(0, 12)}`;
       controller.track(name);
 
-      const guestPolicy = compileGuestPolicy(source.config, cwd, readMounts);
-      const guestEnv = guestCodingEnvironment(env ?? process.env, options.gitIdentity());
+      const guestPolicy = compileGuestPolicy(source.config, cwd, readMounts, environmentPlan);
+      const guestEnv = guestCodingEnvironment(
+        env ?? process.env,
+        options.gitIdentity(),
+        environmentPlan?.env,
+      );
       const request = {
         type: "execute",
         command,
@@ -118,6 +126,7 @@ export function createAppleContainerBashOperations(
         workspaceSource: transaction.staged,
         workspaceTarget: cwd,
         readMounts,
+        environmentMounts,
       });
       let child: ChildProcess | undefined;
       let timedOut = false;
@@ -238,8 +247,15 @@ export function buildContainerRunArgs(input: {
   workspaceSource: string;
   workspaceTarget: string;
   readMounts: string[];
+  environmentMounts?: EnvironmentMount[];
 }): string[] {
-  for (const path of [input.workspaceSource, input.workspaceTarget, ...input.readMounts]) {
+  const environmentMounts = input.environmentMounts ?? [];
+  for (const path of [
+    input.workspaceSource,
+    input.workspaceTarget,
+    ...input.readMounts,
+    ...environmentMounts.flatMap((mount) => [mount.source, mount.target]),
+  ]) {
     if (path.includes(",")) throw new Error(`Apple container mount paths containing commas are unsupported: ${path}`);
   }
   const args = [
@@ -268,6 +284,12 @@ export function buildContainerRunArgs(input: {
     mountDirective(join(SANDBOX_TEMP_ROOT, "cache"), GUEST_CACHE_ROOT, false),
   ];
   for (const path of input.readMounts) args.push("--mount", mountDirective(path, path, true));
+  for (const mount of environmentMounts) {
+    if (!isAbsolute(mount.source) || !isAbsolute(mount.target)) {
+      throw new Error("Apple container environment mount paths must be absolute");
+    }
+    args.push("--mount", mountDirective(mount.source, mount.target, mount.readonly));
+  }
   args.push(input.config.image);
   return args;
 }
@@ -276,6 +298,7 @@ export function compileGuestPolicy(
   config: SandboxConfig,
   workspace: string,
   readMounts: string[],
+  environmentPlan?: EnvironmentPlan,
 ): SandboxRuntimeConfig {
   const workspaceWritable = config.filesystem.allowWrite.some((entry) => {
     const allowed = entry === "." ? resolve(workspace) : resolve(workspace, entry);
@@ -298,6 +321,8 @@ export function compileGuestPolicy(
       allowRead: [
         workspace,
         ...readMounts,
+        ...(environmentPlan?.allowRead ?? []),
+        ...((environmentPlan?.mounts ?? []).map((mount) => mount.target)),
         GUEST_CACHE_ROOT,
         "/usr",
         "/bin",
@@ -312,7 +337,14 @@ export function compileGuestPolicy(
         "/tmp",
         "/opt/pi-sandbox",
       ],
-      allowWrite: ["/tmp", GUEST_CACHE_ROOT, ...(workspaceWritable ? [workspace] : [])],
+      allowWrite: [
+        "/tmp",
+        GUEST_CACHE_ROOT,
+        ...((environmentPlan?.mounts ?? [])
+          .filter((mount) => !mount.readonly)
+          .map((mount) => mount.target)),
+        ...(workspaceWritable ? [workspace] : []),
+      ],
       denyWrite: structuredClone(config.filesystem.denyWrite),
       allowGitConfig: config.filesystem.allowGitConfig,
     },
@@ -322,12 +354,17 @@ export function compileGuestPolicy(
   };
 }
 
-function guestCodingEnvironment(env: NodeJS.ProcessEnv, identity?: GitIdentity): NodeJS.ProcessEnv {
-  const host = codingCacheEnvironment(env, identity);
+function guestCodingEnvironment(
+  env: NodeJS.ProcessEnv,
+  identity?: GitIdentity,
+  developmentEnvironment?: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const host = codingCacheEnvironment(env, identity, developmentEnvironment);
   const guest: NodeJS.ProcessEnv = {
     ...host,
     HOME: "/tmp/pi-home",
-    PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    PATH: developmentEnvironment?.PATH
+      ?? "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     TMPDIR: "/tmp",
     TMP: "/tmp",
     TEMP: "/tmp",

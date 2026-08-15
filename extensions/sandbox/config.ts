@@ -6,6 +6,43 @@ import { SANDBOX_TEMP_ROOT } from "./sandbox-paths.ts";
 import { errorMessage } from "./util.ts";
 
 export type SandboxBackendMode = "auto" | "process" | "apple-container";
+export type EnvironmentInstallMode = "never" | "ask" | "auto";
+export type EnvironmentProfileSource = "auto" | "local" | "managed";
+
+interface RuntimeEnvironmentProfileConfig {
+  version?: string;
+  source: EnvironmentProfileSource;
+}
+
+export interface DevelopmentEnvironmentsConfig {
+  promptOnStart: boolean;
+  selected: string[];
+  install: {
+    mode: EnvironmentInstallMode;
+    maxSize: string;
+    retentionDays: number;
+  };
+  profiles: {
+    go: RuntimeEnvironmentProfileConfig;
+    python: RuntimeEnvironmentProfileConfig & {
+      source: EnvironmentProfileSource | "project-venv-or-managed";
+    };
+    node: RuntimeEnvironmentProfileConfig;
+    pnpm: {
+      version?: string;
+      storeScope: "project" | "global";
+    };
+    kubectl: RuntimeEnvironmentProfileConfig;
+  };
+}
+
+export interface KubernetesConfig {
+  promptOnStart: boolean;
+  defaultAccess: "observe" | "rbac";
+  defaultNamespaces: "context" | "all";
+  persistContextSelection: boolean;
+  credentialMode: "host-broker";
+}
 
 export interface AppleContainerConfig {
   binary: string;
@@ -31,6 +68,8 @@ export interface SandboxConfig extends SandboxRuntimeConfig {
    * are always matched by the built-in detectors and do not need to be listed.
    */
   hostExec?: { commands?: string[] };
+  developmentEnvironments: DevelopmentEnvironmentsConfig;
+  kubernetes: KubernetesConfig;
 }
 
 export interface LoadedSandboxConfig {
@@ -107,6 +146,9 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
       "*.rubygems.org",
       "proxy.golang.org",
       "sum.golang.org",
+      "go.dev",
+      "dl.google.com",
+      "dl.k8s.io",
       "storage.googleapis.com",
       "repo.maven.apache.org",
       "plugins.gradle.org",
@@ -161,6 +203,29 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
       workspaceMode: "transactional-apfs",
     },
   },
+  developmentEnvironments: {
+    promptOnStart: true,
+    selected: [],
+    install: {
+      mode: "ask",
+      maxSize: "5g",
+      retentionDays: 30,
+    },
+    profiles: {
+      go: { source: "auto" },
+      python: { source: "project-venv-or-managed" },
+      node: { source: "auto" },
+      pnpm: { storeScope: "project" },
+      kubectl: { source: "auto" },
+    },
+  },
+  kubernetes: {
+    promptOnStart: true,
+    defaultAccess: "observe",
+    defaultNamespaces: "context",
+    persistContextSelection: false,
+    credentialMode: "host-broker",
+  },
   hostExec: {
     // Only cloud-CLI tools whose credentials live in `~` files and whose
     // operations are network-bound are promoted to the host by default:
@@ -185,6 +250,7 @@ export function mergeSandboxConfig(
   overrides: unknown,
 ): SandboxConfig {
   if (!isRecord(overrides)) return structuredClone(base);
+  validateSandboxOverrides(overrides);
 
   const merged = structuredClone(base);
   if (typeof overrides.enabled === "boolean") merged.enabled = overrides.enabled;
@@ -198,6 +264,14 @@ export function mergeSandboxConfig(
       (merged as unknown as Record<string, unknown>)[key] = structuredClone(overrides[key]);
     }
   }
+  mergeDevelopmentEnvironmentConfig(merged, overrides.developmentEnvironments);
+  if (isRecord(overrides.kubernetes)) {
+    merged.kubernetes = {
+      ...merged.kubernetes,
+      ...structuredClone(overrides.kubernetes),
+    } as KubernetesConfig;
+  }
+
   if (isRecord(overrides.isolation)) {
     const isolation = overrides.isolation;
     const appleContainer = isRecord(isolation.appleContainer)
@@ -236,21 +310,138 @@ export function loadSandboxConfig(
 
   const globalConfig = readConfigFile(globalPath, warnings);
   if (globalConfig !== undefined) {
-    config = mergeSandboxConfig(config, globalConfig);
-    loadedFrom.push(globalPath);
+    try {
+      config = mergeSandboxConfig(config, globalConfig);
+      loadedFrom.push(globalPath);
+    } catch (error) {
+      warnings.push(`Could not apply ${globalPath}: ${errorMessage(error)}`);
+    }
   }
 
   if (projectTrusted) {
     const projectConfig = readConfigFile(projectPath, warnings);
     if (projectConfig !== undefined) {
-      config = mergeSandboxConfig(config, projectConfig);
-      loadedFrom.push(projectPath);
+      try {
+        config = mergeSandboxConfig(config, projectConfig);
+        loadedFrom.push(projectPath);
+      } catch (error) {
+        warnings.push(`Could not apply ${projectPath}: ${errorMessage(error)}`);
+      }
     }
   } else if (existsSync(projectPath)) {
     warnings.push(`Ignored untrusted project configuration: ${projectPath}`);
   }
 
   return { config, loadedFrom, warnings };
+}
+
+function validateSandboxOverrides(overrides: Record<string, unknown>): void {
+  const environments = overrides.developmentEnvironments;
+  if (isRecord(environments)) {
+    assertOptionalBoolean(environments.promptOnStart, "developmentEnvironments.promptOnStart");
+    if (environments.selected !== undefined) {
+      if (!Array.isArray(environments.selected) || environments.selected.some((id) => (
+        typeof id !== "string" || !["go", "python", "node", "pnpm", "kubectl"].includes(id)
+      ))) {
+        throw new Error("Invalid developmentEnvironments.selected");
+      }
+    }
+    if (isRecord(environments.install)) {
+      assertOptionalEnum(
+        environments.install.mode,
+        ["never", "ask", "auto"],
+        "developmentEnvironments.install.mode",
+      );
+      if (
+        environments.install.maxSize !== undefined
+        && (typeof environments.install.maxSize !== "string"
+          || !/^\d+(?:\.\d+)?(?:[kmgt]i?b?|b)$/i.test(environments.install.maxSize))
+      ) {
+        throw new Error("Invalid developmentEnvironments.install.maxSize");
+      }
+      if (
+        environments.install.retentionDays !== undefined
+        && (!Number.isInteger(environments.install.retentionDays)
+          || Number(environments.install.retentionDays) < 0
+          || Number(environments.install.retentionDays) > 3650)
+      ) {
+        throw new Error("Invalid developmentEnvironments.install.retentionDays");
+      }
+    }
+    if (isRecord(environments.profiles)) {
+      for (const id of ["go", "python", "node", "pnpm", "kubectl"] as const) {
+        const profile = environments.profiles[id];
+        if (!isRecord(profile)) continue;
+        if (
+          profile.version !== undefined
+          && (typeof profile.version !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,127}$/.test(profile.version))
+        ) {
+          throw new Error(`Invalid developmentEnvironments.profiles.${id}.version`);
+        }
+        if (id === "pnpm") {
+          assertOptionalEnum(
+            profile.storeScope,
+            ["project", "global"],
+            `developmentEnvironments.profiles.${id}.storeScope`,
+          );
+        } else {
+          const sources = id === "python"
+            ? ["auto", "local", "managed", "project-venv-or-managed"]
+            : ["auto", "local", "managed"];
+          assertOptionalEnum(profile.source, sources, `developmentEnvironments.profiles.${id}.source`);
+        }
+      }
+    }
+  }
+
+  const kubernetes = overrides.kubernetes;
+  if (isRecord(kubernetes)) {
+    assertOptionalBoolean(kubernetes.promptOnStart, "kubernetes.promptOnStart");
+    assertOptionalBoolean(kubernetes.persistContextSelection, "kubernetes.persistContextSelection");
+    assertOptionalEnum(kubernetes.defaultAccess, ["observe", "rbac"], "kubernetes.defaultAccess");
+    assertOptionalEnum(kubernetes.defaultNamespaces, ["context", "all"], "kubernetes.defaultNamespaces");
+    assertOptionalEnum(kubernetes.credentialMode, ["host-broker"], "kubernetes.credentialMode");
+  }
+}
+
+function assertOptionalBoolean(value: unknown, path: string): void {
+  if (value !== undefined && typeof value !== "boolean") throw new Error(`Invalid ${path}`);
+}
+
+function assertOptionalEnum(value: unknown, allowed: readonly string[], path: string): void {
+  if (value !== undefined && (typeof value !== "string" || !allowed.includes(value))) {
+    throw new Error(`Invalid ${path}: ${JSON.stringify(value)}`);
+  }
+}
+
+function mergeDevelopmentEnvironmentConfig(
+  target: SandboxConfig,
+  override: unknown,
+): void {
+  if (!isRecord(override)) return;
+  const current = target.developmentEnvironments;
+  if (typeof override.promptOnStart === "boolean") {
+    current.promptOnStart = override.promptOnStart;
+  }
+  if (Array.isArray(override.selected)) {
+    current.selected = structuredClone(override.selected) as string[];
+  }
+  if (isRecord(override.install)) {
+    current.install = {
+      ...current.install,
+      ...structuredClone(override.install),
+    } as DevelopmentEnvironmentsConfig["install"];
+  }
+  if (isRecord(override.profiles)) {
+    for (const id of ["go", "python", "node", "pnpm", "kubectl"] as const) {
+      const profileOverride = override.profiles[id];
+      if (!isRecord(profileOverride)) continue;
+      current.profiles[id] = {
+        ...current.profiles[id],
+        ...structuredClone(profileOverride),
+      } as never;
+    }
+  }
 }
 
 function legacyAppleContainerMode(value: unknown): SandboxBackendMode {

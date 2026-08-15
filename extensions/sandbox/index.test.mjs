@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,8 +8,10 @@ import test from "node:test";
 import {
   defaultPiReadRoots,
   registerSandboxExtension,
+  resolveAppleContainerHostGateway,
   resolveSandboxBackendMode,
 } from "./index.ts";
+import { EnvironmentStore } from "./environments/store.ts";
 
 function createHarness(runtime, flags = {}, authorizationOptions) {
   const effectiveFlags = { "sandbox-mode": "process", ...flags };
@@ -19,6 +22,7 @@ function createHarness(runtime, flags = {}, authorizationOptions) {
   let writeAuthorizationTool;
   const statuses = new Map();
   const notifications = [];
+  const confirmations = [];
   const pi = {
     registerFlag() {},
     getFlag(name) {
@@ -62,7 +66,8 @@ function createHarness(runtime, flags = {}, authorizationOptions) {
       notify(message, level) {
         notifications.push({ message, level });
       },
-      async confirm() {
+      async confirm(title, message) {
+        confirmations.push({ title, message });
         return true;
       },
       setStatus(key, value) {
@@ -74,7 +79,10 @@ function createHarness(runtime, flags = {}, authorizationOptions) {
   registerSandboxExtension(
     pi,
     runtime,
-    authorizationOptions ?? { allowOsTemp: false },
+    {
+      environmentStore: new EnvironmentStore(join(tmpdir(), `pi-index-test-store-${randomUUID()}`)),
+      ...(authorizationOptions ?? { allowOsTemp: false }),
+    },
   );
   return {
     handlers,
@@ -85,6 +93,7 @@ function createHarness(runtime, flags = {}, authorizationOptions) {
     ctx,
     statuses,
     notifications,
+    confirmations,
   };
 }
 
@@ -139,6 +148,15 @@ function createRuntime({ initializeError } = {}) {
     },
   };
 }
+
+test("Apple Container gateway selection prefers its private bridge", () => {
+  const address = (value) => ({ address: value, family: "IPv4", internal: false, netmask: "255.255.255.0", cidr: `${value}/24`, mac: "00:00:00:00:00:00" });
+  assert.equal(resolveAppleContainerHostGateway({
+    bridge0: [address("192.168.1.1")],
+    bridge100: [address("192.168.65.1")],
+  }), "192.168.65.1");
+  assert.throws(() => resolveAppleContainerHostGateway({}), /unique private Apple Container host gateway/);
+});
 
 test("sandbox backend mode resolves CLI overrides", () => {
   assert.equal(resolveSandboxBackendMode(undefined, "auto"), "auto");
@@ -255,6 +273,256 @@ test("initialized sandbox executes bash with Pi session environment", async () =
 
   await harness.handlers.get("session_shutdown")({}, harness.ctx);
   assert.equal(fake.resetCount(), 1);
+});
+
+test("selected Process development environments inject env and exact read roots", async () => {
+  const fake = createRuntime();
+  const resolvedRequests = [];
+  const harness = createHarness(
+    fake.runtime,
+    { "sandbox-env": "go@1.24.2,python@3.13.2" },
+    {
+      allowOsTemp: false,
+      async environmentResolver(requested) {
+        resolvedRequests.push(requested);
+        return requested.map(({ id }) => id === "go" ? {
+          id: "go",
+          version: "1.24.2",
+          source: "local",
+          binDirectories: ["/managed/go/bin"],
+          env: { GOROOT: "/managed/go", GOENV: "off" },
+          allowRead: ["/managed/go"],
+        } : {
+          id: "python",
+          version: "3.13.2",
+          source: "local",
+          binDirectories: ["/managed/python/bin"],
+          env: { VIRTUAL_ENV: "/managed/python" },
+          allowRead: ["/managed/python"],
+        });
+      },
+    },
+  );
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  const result = await harness.bashTool.execute(
+    "call-env",
+    { command: "printf '%s|%s|%s' \"$GOROOT\" \"$VIRTUAL_ENV\" \"$PATH\"" },
+    undefined,
+    undefined,
+    harness.ctx,
+  );
+
+  assert.equal(resolvedRequests.length, 2);
+  assert.equal(result.content[0].text.startsWith("/managed/go|/managed/python|/managed/go/bin:/managed/python/bin:"), true);
+  const commandConfig = fake.commandConfigs().at(-1);
+  assert.ok(commandConfig.filesystem.allowRead.includes("/managed/go"));
+  assert.ok(commandConfig.filesystem.allowRead.includes("/managed/python"));
+  await harness.commands.get("sandbox")("", harness.ctx);
+  assert.match(harness.notifications.at(-1).message, /go: 1\.24\.2 \(local/);
+  assert.match(harness.notifications.at(-1).message, /python: 3\.13\.2 \(local/);
+});
+
+test("TUI startup selector supplies the environment request when no CLI flag is present", async () => {
+  const fake = createRuntime();
+  let selectorCalls = 0;
+  const harness = createHarness(fake.runtime, {}, {
+    allowOsTemp: false,
+    async environmentSelector() {
+      selectorCalls += 1;
+      return "go@1.24.2";
+    },
+    async environmentResolver() {
+      return [{
+        id: "go",
+        version: "1.24.2",
+        source: "local",
+        binDirectories: ["/managed/go/bin"],
+        env: { GOROOT: "/managed/go" },
+        allowRead: ["/managed/go"],
+      }];
+    },
+  });
+  await harness.handlers.get("session_start")({ reason: "startup" }, harness.ctx);
+  assert.equal(selectorCalls, 1);
+  await harness.commands.get("sandbox")("", harness.ctx);
+  assert.match(harness.notifications.at(-1).message, /go: 1\.24\.2/);
+});
+
+test("forced Apple Container installs missing exact managed runtimes after approval", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-sandbox-managed-install-"));
+  const store = new EnvironmentStore(root);
+  let installs = 0;
+  const fake = createRuntime();
+  const harness = createHarness(fake.runtime, {
+    "sandbox-mode": "apple-container",
+    "sandbox-env": "go@1.24.2",
+  }, {
+    allowOsTemp: false,
+    appleContainerController: createAppleController(),
+    environmentStore: store,
+    async runtimeInstaller(targetStore, profile, version, platform) {
+      installs += 1;
+      const stagingPath = await targetStore.createStagingDirectory(profile);
+      await mkdir(join(stagingPath, "bin"), { recursive: true });
+      await writeFile(join(stagingPath, "bin", profile), "#!/bin/sh\n", { mode: 0o755 });
+      return targetStore.publish({
+        stagingPath,
+        digest: "7".repeat(64),
+        platform,
+        profile,
+        version,
+      });
+    },
+  });
+  await harness.handlers.get("session_start")({ reason: "startup" }, harness.ctx);
+  assert.equal(installs, 1);
+  await harness.commands.get("sandbox")("", harness.ctx);
+  assert.match(harness.notifications.at(-1).message, /backend: apple-container/);
+  assert.match(harness.notifications.at(-1).message, /go: 1\.24\.2/);
+});
+
+test("forced Apple Container accepts a managed guest environment plan", async () => {
+  const fake = createRuntime();
+  const controller = createAppleController();
+  const harness = createHarness(
+    fake.runtime,
+    { "sandbox-mode": "apple-container", "sandbox-env": "go@1.24.2" },
+    {
+      allowOsTemp: false,
+      appleContainerController: controller,
+      async managedEnvironmentResolver() {
+        return {
+          backend: "apple-container",
+          platform: "linux-arm64",
+          profiles: [{
+            id: "go",
+            version: "1.24.2",
+            source: "managed",
+            binDirectories: ["/opt/pi-toolchains/go/1.24.2/bin"],
+            env: { PATH: "/opt/pi-toolchains/go/1.24.2/bin:/usr/bin:/bin" },
+            allowRead: ["/opt/pi-toolchains/go/1.24.2"],
+          }],
+          env: { PATH: "/opt/pi-toolchains/go/1.24.2/bin:/usr/bin:/bin" },
+          allowRead: ["/opt/pi-toolchains/go/1.24.2"],
+          mounts: [{
+            source: "/host/go/1.24.2",
+            target: "/opt/pi-toolchains/go/1.24.2",
+            readonly: true,
+          }],
+        };
+      },
+    },
+  );
+  await harness.handlers.get("session_start")({}, harness.ctx);
+  assert.match(harness.statuses.get("sandbox"), /sandbox on/);
+  assert.equal(controller.preflightCount(), 1);
+  await harness.commands.get("sandbox")("", harness.ctx);
+  assert.match(harness.notifications.at(-1).message, /go: 1\.24\.2 \(managed, linux-arm64\)/);
+});
+
+test("forced Apple Container fails closed when a managed environment is missing", async () => {
+  const fake = createRuntime();
+  const harness = createHarness(
+    fake.runtime,
+    { "sandbox-mode": "apple-container", "sandbox-env": "go@1.24.2" },
+    {
+      allowOsTemp: false,
+      async managedEnvironmentResolver() {
+        throw new Error("go@1.24.2 for linux-arm64 is not installed");
+      },
+    },
+  );
+  await harness.handlers.get("session_start")({}, harness.ctx);
+  assert.match(harness.statuses.get("sandbox"), /sandbox blocked/);
+  assert.ok(harness.notifications.some(({ message }) => /is not installed/.test(message)));
+});
+
+test("Kubernetes startup selection and /sandbox kube select inject a revocable sanitized config", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-sandbox-kube-command-"));
+  const bin = join(root, "bin");
+  await mkdir(bin);
+  await writeFile(join(bin, "kubectl"), "#!/bin/sh\n", { mode: 0o755 });
+  const kubeconfigPath = join(root, "sanitized-config.json");
+  const grants = [];
+  const fakeAccess = {
+    kubeconfigPath,
+    async grant(request) { grants.push(request); },
+    async revoke(context) {
+      const index = grants.findIndex((grant) => grant.metadata.name === context);
+      if (index >= 0) grants.splice(index, 1);
+    },
+    async revokeAll() { grants.length = 0; },
+    list() {
+      return grants.map((grant) => ({
+        context: grant.metadata.name,
+        cluster: grant.metadata.cluster,
+        namespace: grant.metadata.namespace,
+        access: grant.access,
+        namespaces: grant.namespaces,
+        authentication: grant.metadata.authentication,
+      }));
+    },
+    async stop() {},
+  };
+  const fake = createRuntime();
+  const harness = createHarness(fake.runtime, { "sandbox-env": "kubectl" }, {
+    allowOsTemp: false,
+    async environmentResolver() {
+      return [{
+        id: "kubectl",
+        version: "1.32.3",
+        source: "local",
+        binDirectories: [bin],
+        env: {},
+        allowRead: [root],
+      }];
+    },
+    async kubernetesContextDiscovery() {
+      return {
+        currentContext: "dev-admin",
+        contexts: [{
+          name: "dev-admin",
+          cluster: "dev",
+          server: "https://dev.example.com",
+          user: "dev-user",
+          namespace: "team-a",
+          authentication: "exec",
+          execCommand: "aws",
+          execArgs: ["eks", "get-token", "--cluster-name", "dev"],
+          execEnvironmentNames: ["AWS_PROFILE"],
+        }],
+      };
+    },
+    async kubernetesAccessFactory() { return fakeAccess; },
+  });
+  harness.ctx.ui.select = async () => "dev-admin";
+  await harness.handlers.get("session_start")({ reason: "startup" }, harness.ctx);
+
+  assert.equal(grants.length, 1, JSON.stringify(harness.notifications));
+  assert.equal(grants[0].access, "observe");
+  assert.match(
+    harness.confirmations.at(-1).message,
+    /"aws" "eks" "get-token" "--cluster-name" "dev".*AWS_PROFILE/s,
+  );
+  assert.deepEqual(grants[0].namespaces, ["team-a"]);
+  const result = await harness.bashTool.execute(
+    "kube-env",
+    { command: "printf %s \"$KUBECONFIG\"" },
+    undefined,
+    undefined,
+    harness.ctx,
+  );
+  assert.equal(result.content[0].text, kubeconfigPath);
+  assert.ok(
+    fake.commandConfigs().at(-1).filesystem.denyWrite.includes(kubeconfigPath),
+    "sanitized kubeconfig is read-only to Process sandbox commands",
+  );
+
+  await harness.commands.get("sandbox")("kube revoke dev-admin", harness.ctx);
+  assert.equal(grants.length, 0);
+  await harness.commands.get("sandbox")("kube select dev-admin", harness.ctx);
+  assert.equal(grants.length, 1);
 });
 
 test("OS temp paths are readable from outside the workspace by default", async () => {

@@ -68,16 +68,16 @@ Start the service in a normal host terminal:
 container system start
 ```
 
-Build the pinned guest image from this repository:
+Build the pinned guest image through an explicit HTTP CONNECT proxy reachable from the Apple Container network:
 
 ```bash
-cd extensions/sandbox/container
-container build --platform linux/arm64 \
-  --tag local/pi-sandbox-asrt:0.0.70 \
-  --file Containerfile .
+PI_SANDBOX_BUILD_PROXY=http://192.168.65.1:8234 \
+  extensions/sandbox/container/build.sh
 ```
 
-The image contains Node.js, ASRT 0.0.70, bubblewrap, seccomp support, socat, ripgrep, bash, git, and CA certificates. `package-lock.json` pins transitive npm dependencies.
+`PI_CONTAINER_BINARY` and `PI_SANDBOX_IMAGE` optionally override the default `/opt/homebrew/bin/container` binary and `local/pi-sandbox-asrt:0.0.70` tag. The proxy is mandatory because transparent host TUN/Fake-IP routing is not inherited by the build VM. On this machine Surge exposes HTTP CONNECT on port `8234`; confirm the port in Surge before reuse. Proxy values are passed as BuildKit's predefined upper- and lowercase proxy build arguments rather than persisted in the Containerfile.
+
+The Debian-slim/glibc image contains Node.js, ASRT 0.0.70, bubblewrap, seccomp support, socat, ripgrep, bash, git, and CA certificates. glibc is intentional so official managed Node.js Linux/arm64 distributions use their supported ABI. `package-lock.json` pins transitive npm dependencies.
 
 ## Backend selection
 
@@ -152,7 +152,7 @@ PI_APPLE_CONTAINER_INTEGRATION=1 \
   extensions/sandbox/apple-container.integration.test.mjs
 ```
 
-The integration test expects the pinned local image and running service. It starts a short-lived parent proxy on the host gateway so it works on host networks where Apple VMs cannot directly reach external addresses, while still validating guest ASRT's HTTPS domain allow/deny decisions.
+The integration test expects the pinned local image and running service. It starts a short-lived parent proxy on the host gateway so it works on host networks where Apple VMs cannot directly reach external addresses, while still validating guest ASRT's HTTPS domain allow/deny decisions. Image builds use the separate explicit proxy configured by `PI_SANDBOX_BUILD_PROXY`; build-time package traffic does not pass through the runtime ASRT proxy.
 
 Before treating the mode as stable, verify on the target machine:
 
