@@ -446,6 +446,10 @@ export function registerSandboxExtension(
         | { kind: "failed"; reason: string }
         | { kind: "skipped" };
 
+      const unpinnedEnvironmentIds = requestedEnvironments
+        .filter((request) => request.requestedVersion === undefined)
+        .map((request) => request.id);
+
       let processEnvironmentPlan: EnvironmentPlan | undefined;
       let appleEnvironmentPlan: EnvironmentPlan | undefined;
       let autoAppleOutcome: AutoAppleOutcome = { kind: "skipped" };
@@ -455,7 +459,7 @@ export function registerSandboxExtension(
         appleEnvironmentPlan = await resolveAppleEnvironmentPlan();
       } else if (requestedEnvironments.length === 0) {
         autoAppleOutcome = { kind: "resolved" };
-      } else if (requestedEnvironments.every((request) => request.requestedVersion !== undefined)) {
+      } else if (unpinnedEnvironmentIds.length === 0) {
         try {
           autoAppleOutcome = { kind: "resolved", plan: await resolveAppleEnvironmentPlan() };
         } catch (error) {
@@ -496,6 +500,10 @@ export function registerSandboxExtension(
       } else {
         processEnvironmentPlan = await resolveProcessEnvironmentPlan();
         activeEnvironmentPlan = processEnvironmentPlan;
+        ctx.ui.notify(
+          `Using the Process sandbox instead of Apple Container because ${unpinnedEnvironmentIds.join(", ")} has no pinned version. Pin versions (--sandbox-env ${unpinnedEnvironmentIds.map((id) => `${id}@<version>`).join(",")}) to prefer Apple Container.`,
+          "info",
+        );
       }
 
       await environmentController.activate(

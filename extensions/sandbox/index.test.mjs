@@ -253,6 +253,11 @@ test("auto mode resolves unpinned environments locally without an Apple fallback
 
   assert.equal(controller.preflightCount(), 0, "Apple must not be attempted for unpinned runtimes");
   assert.ok(!harness.notifications.some(({ message }) => /managed Apple environment unavailable/.test(message)));
+  assert.ok(harness.notifications.some(({ message, level }) => (
+    level === "info"
+      && /Using the Process sandbox instead of Apple Container because go has no pinned version/.test(message)
+      && /--sandbox-env go@<version>/.test(message)
+  )));
   assert.match(harness.statuses.get("sandbox"), /sandbox on/);
   await harness.commands.get("sandbox")("", harness.ctx);
   assert.match(harness.notifications.at(-1).message, /Effective backend: process/);
