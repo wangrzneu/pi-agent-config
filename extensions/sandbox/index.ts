@@ -549,7 +549,8 @@ export function registerSandboxExtension(
         requestedBackend,
       };
       setStatus(ctx, state);
-      ctx.ui.notify(`Sandbox ${state.reason}. Bash is blocked; use --no-sandbox only for an explicit bypass.`, "error");
+      const reason = state.reason.replace(/[.\s]+$/, "");
+      ctx.ui.notify(`Sandbox ${reason}. Bash is blocked; use --no-sandbox only for an explicit bypass.`, "error");
     }
   });
 

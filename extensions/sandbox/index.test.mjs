@@ -278,6 +278,9 @@ test("forced Apple Container mode fails closed with a clear message for unpinned
     /require an exact version: go, python/.test(message)
       && /--sandbox-env go@<version>/.test(message)
   )));
+  const error = harness.notifications.find(({ level }) => level === "error");
+  assert.ok(error, "expected an error notification");
+  assert.doesNotMatch(error.message, /\.\./);
 });
 
 test("unlisted network domains request approval once per session", async () => {
