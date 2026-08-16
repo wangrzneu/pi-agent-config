@@ -92,13 +92,13 @@ test("trusted catalog resolves exact runtime artifacts across platforms and prof
   );
 
   assert.equal(
-    (await resolveTrustedRuntimeManifest("kubectl", "1.29.0", "linux-arm64", { fetch: fetchImpl })).url,
-    "https://dl.k8s.io/release/v1.29.0/bin/linux/arm64/kubectl",
+    (await resolveTrustedRuntimeManifest("kubectl", "1.32.3", "linux-arm64", { fetch: fetchImpl })).url,
+    "https://dl.k8s.io/release/v1.32.3/bin/linux/arm64/kubectl",
   );
   // dl.k8s.io also uses amd64 for the x64 target.
   assert.equal(
-    (await resolveTrustedRuntimeManifest("kubectl", "1.29.0", "linux-x64", { fetch: fetchImpl })).url,
-    "https://dl.k8s.io/release/v1.29.0/bin/linux/amd64/kubectl",
+    (await resolveTrustedRuntimeManifest("kubectl", "1.32.3", "linux-x64", { fetch: fetchImpl })).url,
+    "https://dl.k8s.io/release/v1.32.3/bin/linux/amd64/kubectl",
   );
 
   assert.deepEqual(
@@ -171,7 +171,7 @@ test("trusted catalog rejects ambiguous manifests, unsupported profiles, and ori
       "https://nodejs.org/dist/v26.5.0/SHASUMS256.txt",
     ),
   }), /exactly one/);
-  await assert.rejects(resolveTrustedRuntimeManifest("kubectl", "1.29.0", "linux-arm64", {
+  await assert.rejects(resolveTrustedRuntimeManifest("kubectl", "1.32.3", "linux-arm64", {
     fetch: async () => response(KUBECTL_DIGEST, "https://attacker.example/kubectl.sha256"),
   }), /untrusted origin/);
 });

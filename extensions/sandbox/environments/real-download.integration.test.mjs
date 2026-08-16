@@ -159,7 +159,7 @@ integrationTest("official Go, Node.js, and kubectl artifacts install and execute
   const workspace = await mkdtemp(join(tmpdir(), "pi-real-runtime-workspace-"));
   const storeRoot = await mkdtemp(join(tmpdir(), "pi-real-runtime-store-"));
   const store = new EnvironmentStore(storeRoot);
-  const versions = { go: "1.26.6", python: "3.13.9", node: "26.5.0", kubectl: "1.29.0" };
+  const versions = { go: "1.26.6", python: "3.13.9", node: "26.5.0", kubectl: "1.32.3" };
   const controller = new AppleContainerController();
   const tracker = new SandboxProcessTracker();
   const container = {
@@ -200,7 +200,7 @@ integrationTest("official Go, Node.js, and kubectl artifacts install and execute
     assert.equal(result.exitCode, 0, output);
     assert.match(output, /go version go1\.26\.6 linux\/arm64/);
     assert.match(output, /Python 3\.13\.9/);
-    assert.match(output, /v1\.29\.0/);
+    assert.match(output, /v1\.32\.3/);
   } finally {
     await controller.stopAll(container.binary);
     await tracker.stopAll();

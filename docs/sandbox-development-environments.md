@@ -30,7 +30,7 @@ Example:
 
 ```bash
 pi --sandbox-mode apple-container \
-  --sandbox-env go@1.26.6,python@3.13.9,node@26.5.0,pnpm@10.33.0,kubectl@1.29.0
+  --sandbox-env go@1.26.6,python@3.13.9,node@26.5.0,pnpm@10.33.0,kubectl@1.32.3
 ```
 
 ## Current state
@@ -101,7 +101,7 @@ current initialization.
       "python": { "version": "3.13.9", "source": "auto" },
       "node": { "version": "26.5.0", "source": "auto" },
       "pnpm": { "version": "10.33.0", "storeScope": "project" },
-      "kubectl": { "version": "1.29.0", "source": "auto" }
+      "kubectl": { "version": "1.32.3", "source": "auto" }
     }
   },
   "kubernetes": {

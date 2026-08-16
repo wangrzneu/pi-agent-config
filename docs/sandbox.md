@@ -30,7 +30,7 @@ Interactive TUI startup shows a multi-selector when `developmentEnvironments.pro
 
 ```bash
 pi --sandbox-mode process --sandbox-env go,python,node,pnpm,kubectl
-pi --sandbox-mode apple-container --sandbox-env go@1.26.6,python@3.13.9,node@26.5.0,pnpm@10.33.0,kubectl@1.29.0
+pi --sandbox-mode apple-container --sandbox-env go@1.26.6,python@3.13.9,node@26.5.0,pnpm@10.33.0,kubectl@1.32.3
 ```
 
 Process mode resolves already active/local tools without sourcing a login shell and adds only their canonical runtime roots to shell read access. Apple Container mode resolves exact Linux/arm64 objects already present in Pi's content-addressed environment store and mounts each object read-only. pnpm implicitly selects Node.js. `/sandbox` reports the effective profiles, versions, sources, and platform.
