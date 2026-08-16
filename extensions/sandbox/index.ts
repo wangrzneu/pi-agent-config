@@ -437,6 +437,12 @@ export function registerSandboxExtension(
         resolutionContext,
       );
 
+      // Apple managed runtimes can only be served with exact versions (the
+      // Linux guest cannot reuse a host-local interpreter). In auto mode a
+      // version-less selection therefore resolves locally via the Process
+      // backend rather than surfacing a misleading VM fallback warning.
+      const autoPrefersApple = requestedEnvironments.every((request) => request.requestedVersion !== undefined);
+
       let processEnvironmentPlan: EnvironmentPlan | undefined;
       let appleEnvironmentPlan: EnvironmentPlan | undefined;
       let appleEnvironmentError: unknown;
@@ -444,7 +450,7 @@ export function registerSandboxExtension(
         processEnvironmentPlan = await resolveProcessEnvironmentPlan();
       } else if (requestedBackend === "apple-container") {
         appleEnvironmentPlan = await resolveAppleEnvironmentPlan();
-      } else if (requestedEnvironments.length > 0) {
+      } else if (requestedEnvironments.length > 0 && autoPrefersApple) {
         try {
           appleEnvironmentPlan = await resolveAppleEnvironmentPlan();
         } catch (error) {
@@ -467,7 +473,7 @@ export function registerSandboxExtension(
           `${fallbackReason}. Falling back to the Process sandbox.`,
           "warning",
         );
-      } else {
+      } else if (appleEnvironmentPlan !== undefined || requestedEnvironments.length === 0) {
         try {
           await appleContainer.preflight(loaded.config.isolation.appleContainer, ctx.cwd);
           effectiveBackend = "apple-container";
@@ -481,6 +487,9 @@ export function registerSandboxExtension(
             "warning",
           );
         }
+      } else {
+        processEnvironmentPlan = await resolveProcessEnvironmentPlan();
+        activeEnvironmentPlan = processEnvironmentPlan;
       }
 
       await environmentController.activate(

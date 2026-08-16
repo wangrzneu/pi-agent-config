@@ -63,6 +63,12 @@ export class SandboxEnvironmentSessionController {
     context: EnvironmentResolutionContext,
   ): Promise<EnvironmentPlan | undefined> {
     if (requested.length === 0) return undefined;
+    const unpinned = requested.filter((request) => !request.requestedVersion);
+    if (unpinned.length > 0) {
+      throw new Error(
+        `Apple Container managed runtimes require an exact version: ${unpinned.map((request) => request.id).join(", ")}. Pin each with --sandbox-env ${unpinned.map((request) => `${request.id}@<version>`).join(",")} or developmentEnvironments.profiles versions, or use the Process backend.`,
+      );
+    }
     if (!this.options.managedResolver) {
       await provisionManagedObjects(requested, {
         store: this.options.store,

@@ -228,6 +228,53 @@ test("forced Apple Container mode fails closed when prerequisites are missing", 
   assert.ok(harness.notifications.some(({ message }) => /guest image is missing/.test(message)));
 });
 
+test("auto mode resolves unpinned environments locally without an Apple fallback warning", async () => {
+  const fake = createRuntime();
+  const controller = createAppleController();
+  const harness = createHarness(
+    fake.runtime,
+    { "sandbox-mode": "auto", "sandbox-env": "go" },
+    {
+      allowOsTemp: false,
+      appleContainerController: controller,
+      async environmentResolver(requested) {
+        return requested.map(({ id }) => ({
+          id,
+          version: "1.24.2",
+          source: "local",
+          binDirectories: ["/managed/go/bin"],
+          env: { GOROOT: "/managed/go", GOENV: "off" },
+          allowRead: ["/managed/go"],
+        }));
+      },
+    },
+  );
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  assert.equal(controller.preflightCount(), 0, "Apple must not be attempted for unpinned runtimes");
+  assert.ok(!harness.notifications.some(({ message }) => /managed Apple environment unavailable/.test(message)));
+  assert.match(harness.statuses.get("sandbox"), /sandbox on/);
+  await harness.commands.get("sandbox")("", harness.ctx);
+  assert.match(harness.notifications.at(-1).message, /Effective backend: process/);
+  assert.match(harness.notifications.at(-1).message, /go: 1\.24\.2 \(local/);
+});
+
+test("forced Apple Container mode fails closed with a clear message for unpinned runtimes", async () => {
+  const fake = createRuntime();
+  const harness = createHarness(
+    fake.runtime,
+    { "sandbox-mode": "apple-container", "sandbox-env": "go,python" },
+    { allowOsTemp: false, appleContainerController: createAppleController() },
+  );
+  await harness.handlers.get("session_start")({}, harness.ctx);
+
+  assert.match(harness.statuses.get("sandbox"), /sandbox blocked/);
+  assert.ok(harness.notifications.some(({ message }) => (
+    /require an exact version: go, python/.test(message)
+      && /--sandbox-env go@<version>/.test(message)
+  )));
+});
+
 test("unlisted network domains request approval once per session", async () => {
   const fake = createRuntime();
   const harness = createHarness(fake.runtime);

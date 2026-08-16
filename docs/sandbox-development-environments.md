@@ -159,9 +159,12 @@ selected objects are mounted read-only under `/opt/pi-toolchains` or
 The existing transactional workspace, guest ASRT policy, proxy-only network,
 and root-read-only container remain in force.
 
-`auto` may fall back from Apple Container to Process only when the complete
-Selection can be satisfied by Process. Forced `apple-container` fails closed.
-Neither mode ever falls back to an unsandboxed shell.
+Managed guest runtimes require an exact version, so in `auto` mode a
+version-less Selection is resolved by the Process backend directly rather than
+attempting the VM. Forced `apple-container` fails closed with a message that
+names the unpinned profiles. `auto` may fall back from Apple Container to
+Process only when the complete Selection can be satisfied by Process, and
+neither mode ever falls back to an unsandboxed shell.
 
 ## Content-addressed store
 
