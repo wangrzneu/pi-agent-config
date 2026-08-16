@@ -17,7 +17,9 @@ const execFileAsync = promisify(execFile);
 
 integrationTest("Apple Container reaches the capability gateway only on the private host bridge", async () => {
   await ensureSandboxTempRoot();
-  const host = resolveAppleContainerHostGateway();
+  const host = await resolveAppleContainerHostGateway({
+    containerBinary: DEFAULT_SANDBOX_CONFIG.isolation.appleContainer.binary,
+  });
   const upstream = http.createServer((_request, response) => response.end('{"bridge":"ok"}'));
   await new Promise((resolve, reject) => {
     upstream.once("error", reject);

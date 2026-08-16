@@ -156,13 +156,24 @@ function createRuntime({ initializeError } = {}) {
   };
 }
 
-test("Apple Container gateway selection prefers its private bridge", () => {
+test("Apple Container gateway prefers the authoritative container CLI, then the bridge heuristic", async () => {
   const address = (value) => ({ address: value, family: "IPv4", internal: false, netmask: "255.255.255.0", cidr: `${value}/24`, mac: "00:00:00:00:00:00" });
-  assert.equal(resolveAppleContainerHostGateway({
-    bridge0: [address("192.168.1.1")],
-    bridge100: [address("192.168.65.1")],
+
+  assert.equal(await resolveAppleContainerHostGateway({
+    containerBinary: "/usr/bin/container",
+    run: async () => JSON.stringify([{ status: { ipv4Gateway: "192.168.64.1" } }]),
+  }), "192.168.64.1");
+
+  assert.equal(await resolveAppleContainerHostGateway({
+    interfaces: {
+      bridge0: [address("192.168.1.1")],
+      bridge100: [address("192.168.65.1")],
+    },
   }), "192.168.65.1");
-  assert.throws(() => resolveAppleContainerHostGateway({}), /unique private Apple Container host gateway/);
+  await assert.rejects(
+    resolveAppleContainerHostGateway({ interfaces: {} }),
+    /unique private Apple Container host gateway/,
+  );
 });
 
 test("sandbox backend mode resolves CLI overrides", () => {

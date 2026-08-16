@@ -180,6 +180,7 @@ export function registerSandboxExtension(
     environmentResolver: authorizationOptions.environmentResolver,
     contextDiscovery: authorizationOptions.kubernetesContextDiscovery,
     accessFactory: authorizationOptions.kubernetesAccessFactory,
+    appleContainerBinary: () => state.loaded?.config.isolation.appleContainer.binary,
     selectionStore: kubernetesSelectionStore,
   });
   const processOperations = createSandboxedBashOperations(runtime, tracker, () => {

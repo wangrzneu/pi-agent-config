@@ -37,6 +37,7 @@ export interface KubernetesControllerOptions {
   environmentResolver?: typeof resolveLocalEnvironments;
   contextDiscovery?: typeof discoverKubernetesContexts;
   accessFactory?: () => Promise<KubernetesSessionAccess>;
+  appleContainerBinary?: () => string | undefined;
   selectionStore: KubernetesContextSelectionStore;
 }
 
@@ -196,7 +197,7 @@ export class SandboxKubernetesController {
       return this.access;
     }
     const gatewayHost = backend === "apple-container"
-      ? resolveAppleContainerHostGateway()
+      ? await resolveAppleContainerHostGateway({ containerBinary: this.options.appleContainerBinary?.() })
       : "127.0.0.1";
     const tls = await createKubernetesGatewayTlsMaterial(
       join(SANDBOX_TEMP_ROOT, "kubernetes", "tls"),
