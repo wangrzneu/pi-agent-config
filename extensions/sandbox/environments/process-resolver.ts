@@ -1,5 +1,9 @@
 import { delimiter } from "node:path";
-import type { DevelopmentEnvironmentsConfig, EnvironmentInstallMode } from "../config.ts";
+import type {
+  DevelopmentEnvironmentsConfig,
+  EnvironmentInstallMode,
+  EnvironmentProfileSource,
+} from "../config.ts";
 import { installTrustedRuntime } from "./artifact-catalog.ts";
 import { composeEnvironmentPlan } from "./composer.ts";
 import type { RuntimeInstallerOptions } from "./installer.ts";
@@ -118,8 +122,9 @@ export async function provisionManagedObjects(
 function configuredSource(
   id: EnvironmentId,
   config: DevelopmentEnvironmentsConfig,
-): "auto" | "local" | "managed" {
+): EnvironmentProfileSource {
+  // pnpm is always bound to the selected Node profile rather than resolved
+  // independently from a local installation.
   if (id === "pnpm") return "auto";
-  const source = config.profiles[id].source;
-  return source === "project-venv-or-managed" ? "auto" : source;
+  return config.profiles[id].source;
 }

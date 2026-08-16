@@ -98,7 +98,7 @@ current initialization.
     },
     "profiles": {
       "go": { "version": "1.24.2", "source": "auto" },
-      "python": { "version": "3.13.2", "source": "project-venv-or-managed" },
+      "python": { "version": "3.13.2", "source": "auto" },
       "node": { "version": "22.14.0", "source": "auto" },
       "pnpm": { "version": "10.6.0", "storeScope": "project" },
       "kubectl": { "version": "1.32.3", "source": "auto" }
@@ -225,8 +225,11 @@ mounts a verified Linux Go distribution read-only. Both use sandbox-owned
 
 ### Python
 
-Process prefers `<workspace>/.venv`, then an already active `VIRTUAL_ENV`, then
-a local or managed interpreter. Probing uses isolated mode (`-I -S`). It clears
+Process probes an already-active `VIRTUAL_ENV` first, then `PATH`, and falls
+back to a managed interpreter. It never executes a project-controlled `.venv`
+during trusted startup, so project code and project `PATH` shims cannot run in
+the trusted resolution process (project venvs are instead created by the Apple
+guest bootstrap below). Probing uses isolated mode (`-I -S`). It clears
 `PYTHONPATH` and `PYTHONHOME`, enables `PYTHONNOUSERSITE`, and retains
 `PIP_CONFIG_FILE=/dev/null`.
 
@@ -430,10 +433,19 @@ Completed:
    sandbox-restricted archive extraction.
 7. Apple private bridge-interface Kubernetes gateway and startup context
    selector without a public listener.
+8. Pinned relocatable Python catalog (`3.11.11`/`3.12.9`/`3.13.2`) with
+   cross-platform manifest coverage.
+9. Apple project-scoped trusted-bootstrap Python venv and isolated pnpm store.
+10. Environment and Kubernetes session controllers extracted from the extension
+    entrypoint.
+11. Failure-injection and recovery regression tests: installer HTTP/oversize
+    and redirect, gateway non-loopback upstream, and store concurrent publish
+    and corrupted/dangling reference recovery.
 
 Remaining:
 
-- Continue cross-platform and failure-injection integration hardening.
+- Continue cross-platform (darwin-x64/linux-x64) catalog coverage and
+  failure-injection integration hardening.
 
 Recommended defaults are backend `auto`, install mode `ask`, globally shared
 read-only Runtime Objects, project Python/pnpm state, no Kubernetes context grant,

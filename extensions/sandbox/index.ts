@@ -15,7 +15,6 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import {
   loadSandboxConfig,
   type LoadedSandboxConfig,
@@ -33,9 +32,26 @@ import {
   SandboxProcessTracker,
   type SandboxCommandRuntime,
 } from "./process.ts";
+import {
+  authorizePaths,
+  fileAccessPath,
+  PATH_ACCESS_META,
+  registerPathAuthorizationTool,
+  type PathAccess,
+} from "./path-gate.ts";
 import { SandboxPathAuthorization } from "./path-authorization.ts";
 import { ensureSandboxTempRoot, SANDBOX_TEMP_ROOT } from "./sandbox-paths.ts";
-import { errorMessage } from "./util.ts";
+import {
+  formatBytes,
+  formatEnvironmentRequests,
+  formatEnvironmentStoreStatus,
+  formatState,
+  setStatus,
+  STATUS_KEY,
+  type EffectiveSandboxBackend,
+  type SandboxState,
+} from "./status.ts";
+import { errorMessage, unquote } from "./util.ts";
 import { installTrustedRuntime } from "./environments/artifact-catalog.ts";
 import { resolveLocalEnvironments } from "./environments/local-resolver.ts";
 import { resolveManagedEnvironmentPlan } from "./environments/managed-resolver.ts";
@@ -54,28 +70,6 @@ import { KubernetesContextSelectionStore } from "./kubernetes/context-selection-
 import { KubernetesSessionAccess } from "./kubernetes/session-access.ts";
 
 export { resolveAppleContainerHostGateway } from "./kubernetes/apple-bridge.ts";
-
-const STATUS_KEY = "sandbox";
-
-type EffectiveSandboxBackend = Exclude<SandboxBackendMode, "auto">;
-
-type SandboxState =
-  | {
-      mode: "starting" | "bypass" | "blocked";
-      reason: string;
-      loaded?: LoadedSandboxConfig;
-      requestedBackend?: SandboxBackendMode;
-      effectiveBackend?: never;
-      environmentPlan?: EnvironmentPlan;
-    }
-  | {
-      mode: "sandboxed";
-      reason: string;
-      loaded: LoadedSandboxConfig;
-      requestedBackend: SandboxBackendMode;
-      effectiveBackend: EffectiveSandboxBackend;
-      environmentPlan?: EnvironmentPlan;
-    };
 
 interface SandboxRuntime extends SandboxCommandRuntime {
   initialize(config: SandboxRuntimeConfig, ask?: SandboxAskCallback): Promise<void>;
@@ -650,109 +644,6 @@ export function registerSandboxExtension(
   });
 }
 
-function setStatus(ctx: ExtensionContext, state: SandboxState): void {
-  if (!ctx.hasUI) return;
-  const status = state.mode === "sandboxed"
-    ? ctx.ui.theme.fg("success", " sandbox on")
-    : state.mode === "blocked"
-      ? ctx.ui.theme.fg("error", " sandbox blocked")
-      : ctx.ui.theme.fg("warning", " sandbox off");
-  ctx.ui.setStatus(STATUS_KEY, status);
-}
-
-function formatEnvironmentStoreStatus(
-  status: Awaited<ReturnType<EnvironmentStore["status"]>>,
-  detailed: boolean,
-): string {
-  const lines = [
-    "Environment store",
-    `  Objects: ${status.objects}`,
-    `  Size: ${formatBytes(status.bytes)}`,
-    `  Leased: ${status.leasedObjects}`,
-  ];
-  if (detailed) {
-    lines.push("  Installed:");
-    if (status.installed.length === 0) lines.push("    (none)");
-    for (const entry of status.installed) {
-      lines.push(
-        `    ${entry.profile}@${entry.version} (${entry.platform}, ${formatBytes(entry.bytes)}${entry.leased ? ", active" : ""})`,
-      );
-    }
-  }
-  return lines.join("\n");
-}
-
-function formatBytes(bytes: number): string {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${unit === 0 ? value : value.toFixed(value >= 10 ? 1 : 2)} ${units[unit]}`;
-}
-
-function formatState(
-  state: SandboxState,
-  readGrants: string[] = [],
-  writeGrants: string[] = [],
-  approvedHostExecWords: ReadonlySet<string> = new Set(),
-  approvedNetworkDomains: ReadonlySet<string> = new Set(),
-): string {
-  const lines = [
-    `Sandbox: ${state.mode}`,
-    `Reason: ${state.reason}`,
-  ];
-  const loaded = state.loaded;
-  if (!loaded) return lines.join("\n");
-
-  const config = loaded.config;
-  const usesAppleContainer = state.effectiveBackend === "apple-container";
-  lines.push(
-    `Configuration: ${loaded.loadedFrom.join(", ") || "built-in defaults"}`,
-    `Requested backend: ${state.requestedBackend ?? "not resolved"}`,
-    `Effective backend: ${state.effectiveBackend ?? "not active"}`,
-    "",
-    "Isolation:",
-    `  Host launcher: ${usesAppleContainer ? "trusted fixed argv (Apple XPC is incompatible with Seatbelt)" : "ASRT (Seatbelt/bubblewrap)"}`,
-    `  Apple Container VM: ${usesAppleContainer ? "enabled" : "disabled"}`,
-    `  Guest process: ${usesAppleContainer ? "ASRT (bubblewrap + proxy; VM isolates host IPC)" : "not applicable"}`,
-    `  Workspace: ${usesAppleContainer ? config.isolation.appleContainer.workspaceMode : "direct"}`,
-    `  Policy parity: ${usesAppleContainer ? "strict (transactional workspace)" : "process backend"}`,
-    "",
-    "Development environments:",
-    ...(state.environmentPlan?.profiles.length
-      ? state.environmentPlan.profiles.map((profile) => (
-          `  ${profile.id}: ${profile.version} (${profile.source}, ${state.environmentPlan?.platform})`
-        ))
-      : ["  (none)"]),
-    "",
-    "Network:",
-    `  Allowed domains: ${config.network.allowedDomains.join(", ") || "(none)"}`,
-    `  Denied domains: ${config.network.deniedDomains.join(", ") || "(none)"}`,
-    `  Prompt for unlisted domains: ${config.network.strictAllowlist === true ? "disabled" : "enabled"}`,
-    `  Session domain grants: ${[...approvedNetworkDomains].join(", ") || "(none)"}`,
-    `  Local binding: ${config.network.allowLocalBinding === true ? "allowed" : "blocked"}`,
-    "",
-    "Filesystem:",
-    `  Deny read: ${config.filesystem.denyRead.join(", ") || "(none)"}`,
-    `  Baseline allow read: ${config.filesystem.allowRead?.join(", ") || "(none)"}`,
-    `  Session read grants: ${readGrants.join(", ") || "(none)"}`,
-    `  Baseline allow write: ${config.filesystem.allowWrite.join(", ") || "(none)"}`,
-    `  Session write grants: ${writeGrants.join(", ") || "(none)"}`,
-    `  Deny write: ${config.filesystem.denyWrite.join(", ") || "(none)"}`,
-    "",
-    "Host execution (after approval):",
-    `  Extra command prefixes: ${config.hostExec?.commands?.join(", ") || "(none)"}`,
-    `  Approved this session: ${[...approvedHostExecWords].join(", ") || "(none)"}`,
-  );
-  if (loaded.warnings.length > 0) {
-    lines.push("", "Warnings:", ...loaded.warnings.map((warning) => `  ${warning}`));
-  }
-  return lines.join("\n");
-}
-
 async function authorizeNetworkDomain(
   rawHost: string,
   port: number | undefined,
@@ -778,135 +669,7 @@ async function authorizeNetworkDomain(
   return approval;
 }
 
-function formatEnvironmentRequests(requests: RequestedEnvironment[]): string {
-  return requests
-    .map((request) => `${request.id}@${request.requestedVersion ?? "unspecified"}`)
-    .join(", ");
-}
-
 function normalizeNetworkHost(host: string): string {
   const normalized = host.toLowerCase();
   return normalized.endsWith(".") ? normalized.slice(0, -1) : normalized;
-}
-
-type PathAccess = "read" | "write";
-
-const PATH_ACCESS_META: Record<PathAccess, {
-  action: string;
-  activity: string;
-  tools: string;
-  phrase: string;
-}> = {
-  read: {
-    action: "read",
-    activity: "reading",
-    tools: "bash, read, grep, find, or ls",
-    phrase: "Reading",
-  },
-  write: {
-    action: "write to",
-    activity: "writing",
-    tools: "bash, write, or edit",
-    phrase: "Writing",
-  },
-};
-
-function registerPathAuthorizationTool(
-  pi: ExtensionAPI,
-  access: PathAccess,
-  authorization: SandboxPathAuthorization,
-): void {
-  const meta = PATH_ACCESS_META[access];
-  pi.registerTool({
-    name: `sandbox_authorize_${access}`,
-    label: `Authorize sandbox ${access}`,
-    description: `Request explicit user approval to ${meta.action} files or directories outside the current workspace for this session. Call this before using ${meta.tools} on external paths.`,
-    promptSnippet: `Request user authorization before ${meta.activity} paths outside the workspace`,
-    promptGuidelines: [
-      `Use sandbox_authorize_${access} before any ${meta.tools} operation that needs to ${meta.action} a path outside the current workspace.`,
-    ],
-    parameters: Type.Object({
-      paths: Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), {
-        minItems: 1,
-        maxItems: 8,
-        uniqueItems: true,
-      }),
-      reason: Type.String({
-        description: `Why ${access} access to these external paths is needed`,
-        minLength: 1,
-        maxLength: 500,
-      }),
-    }),
-    executionMode: "sequential",
-    async execute(_id, params, signal, _onUpdate, ctx) {
-      if (signal?.aborted) throw new Error(`${meta.phrase} authorization cancelled.`);
-      const paths = await authorizePaths(
-        authorization,
-        params.paths,
-        params.reason,
-        access,
-        ctx,
-      );
-      return {
-        content: [{
-          type: "text",
-          text: `Authorized external ${access} access for this session:\n${paths.join("\n")}`,
-        }],
-        details: { access, paths, reason: params.reason },
-      };
-    },
-  });
-}
-
-async function authorizePaths(
-  authorization: SandboxPathAuthorization,
-  rawPaths: string[],
-  reason: string,
-  access: PathAccess,
-  ctx: ExtensionContext,
-): Promise<string[]> {
-  const candidates = await Promise.all(rawPaths.map((path) =>
-    authorization.inspect(path, ctx.cwd, { allowMissing: access === "write" })
-  ));
-  const unique = [...new Map(candidates.map((candidate) => [candidate.path, candidate])).values()];
-  const newGrants = [];
-  for (const candidate of unique) {
-    if (!(await authorization.isAllowed(candidate.path, ctx.cwd))) newGrants.push(candidate);
-  }
-
-  if (newGrants.length > 0) {
-    if (!ctx.hasUI) throw new Error(`External ${access} authorization requires an interactive approval.`);
-    const approved = await ctx.ui.confirm(
-      `Allow external file ${access} access?`,
-      `${reason}\n\n${newGrants.map((grant) => grant.path).join("\n")}\n\nAccess lasts until this session is reloaded or closed.`,
-    );
-    if (!approved) throw new Error(`External ${access} authorization was not approved.`);
-    for (const grant of newGrants) authorization.grant(grant);
-  }
-
-  return unique.map((candidate) => candidate.path);
-}
-
-function fileAccessPath(
-  toolName: string,
-  input: Record<string, unknown>,
-): { kind: PathAccess; path: string } | undefined {
-  if (["read", "grep", "find", "ls"].includes(toolName)) {
-    return { kind: "read", path: typeof input.path === "string" ? input.path : "." };
-  }
-  if (["write", "edit"].includes(toolName) && typeof input.path === "string") {
-    return { kind: "write", path: input.path };
-  }
-  return undefined;
-}
-
-function unquote(value: string): string {
-  if (value.length >= 2) {
-    const first = value[0];
-    const last = value.at(-1);
-    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
-      return value.slice(1, -1);
-    }
-  }
-  return value;
 }

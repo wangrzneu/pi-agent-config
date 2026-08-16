@@ -24,9 +24,7 @@ export interface DevelopmentEnvironmentsConfig {
   };
   profiles: {
     go: RuntimeEnvironmentProfileConfig;
-    python: RuntimeEnvironmentProfileConfig & {
-      source: EnvironmentProfileSource | "project-venv-or-managed";
-    };
+    python: RuntimeEnvironmentProfileConfig;
     node: RuntimeEnvironmentProfileConfig;
     pnpm: {
       version?: string;
@@ -213,7 +211,7 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
     },
     profiles: {
       go: { source: "auto" },
-      python: { source: "project-venv-or-managed" },
+      python: { source: "auto" },
       node: { source: "auto" },
       pnpm: { storeScope: "project" },
       kubectl: { source: "auto" },
@@ -385,10 +383,11 @@ function validateSandboxOverrides(overrides: Record<string, unknown>): void {
             `developmentEnvironments.profiles.${id}.storeScope`,
           );
         } else {
-          const sources = id === "python"
-            ? ["auto", "local", "managed", "project-venv-or-managed"]
-            : ["auto", "local", "managed"];
-          assertOptionalEnum(profile.source, sources, `developmentEnvironments.profiles.${id}.source`);
+          assertOptionalEnum(
+            profile.source,
+            ["auto", "local", "managed"],
+            `developmentEnvironments.profiles.${id}.source`,
+          );
         }
       }
     }

@@ -6,7 +6,7 @@ const config = {
   selected: ["python", "go"],
   profiles: {
     go: { version: "1.24.2", source: "auto" },
-    python: { version: "3.13.2", source: "project-venv-or-managed" },
+    python: { version: "3.13.2", source: "auto" },
     node: { version: "22.14.0", source: "auto" },
     pnpm: { version: "10.6.0", storeScope: "project" },
     kubectl: { version: "1.32.3", source: "auto" },
