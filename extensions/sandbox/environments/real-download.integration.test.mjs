@@ -109,6 +109,51 @@ integrationTest("official Node.js glibc artifact executes with the Debian bootst
   }
 });
 
+integrationTest("pinned Python 3.11 and 3.12 artifacts install and execute in Apple Container", async () => {
+  await ensureSandboxTempRoot();
+  const workspace = await mkdtemp(join(tmpdir(), "pi-real-python-lts-workspace-"));
+  const storeRoot = await mkdtemp(join(tmpdir(), "pi-real-python-lts-store-"));
+  const store = new EnvironmentStore(storeRoot);
+  const controller = new AppleContainerController();
+  const tracker = new SandboxProcessTracker();
+  const container = {
+    ...DEFAULT_SANDBOX_CONFIG.isolation.appleContainer,
+    image: process.env.PI_SANDBOX_TEST_IMAGE ?? DEFAULT_SANDBOX_CONFIG.isolation.appleContainer.image,
+  };
+  const versions = ["3.11.11", "3.12.9"];
+  await controller.preflight(container, workspace);
+  try {
+    for (const version of versions) {
+      await installTrustedRuntime(store, "python", version, "linux-arm64");
+      const plan = await resolveManagedEnvironmentPlan([
+        { id: "python", requestedVersion: version },
+      ], { store, platform: "linux-arm64" });
+      const operations = createAppleContainerBashOperations(controller, {
+        tracker,
+        container,
+        policy: () => ({ config: DEFAULT_SANDBOX_CONFIG, readGrants: [], writeGrants: [] }),
+        gitIdentity: () => undefined,
+        authorizeNetwork: async () => false,
+        environment: () => plan,
+      });
+      const chunks = [];
+      const result = await operations.exec("python --version", workspace, {
+        onData: (chunk) => chunks.push(chunk),
+        timeout: 90,
+      });
+      const output = Buffer.concat(chunks).toString("utf8");
+      assert.equal(result.exitCode, 0, output);
+      assert.match(output, new RegExp(`Python ${version.replaceAll(".", "\\.")}`));
+    }
+  } finally {
+    await controller.stopAll(container.binary);
+    await tracker.stopAll();
+    await rm(workspace, { recursive: true, force: true });
+    await store.prune({ maxBytes: 0, retentionDays: 0 }).catch(() => undefined);
+    await rm(storeRoot, { recursive: true, force: true });
+  }
+});
+
 integrationTest("official Go, Node.js, and kubectl artifacts install and execute where ABI-compatible", async () => {
   await ensureSandboxTempRoot();
   const workspace = await mkdtemp(join(tmpdir(), "pi-real-runtime-workspace-"));
