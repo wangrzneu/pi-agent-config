@@ -25,6 +25,15 @@ export interface ManagedEnvironmentResolutionContext {
   platform: string;
 }
 
+export function managedExactVersionMessage(ids: readonly EnvironmentId[]): string {
+  const uniqueIds = [...new Set(ids)];
+  return [
+    `Managed runtimes require an exact version: ${uniqueIds.join(", ")}.`,
+    `Pin each with --sandbox-env ${uniqueIds.map((id) => `${id}@<version>`).join(",")}`,
+    "or developmentEnvironments.profiles.<id>.version.",
+  ].join(" ");
+}
+
 export async function resolveStoredEnvironments(
   requested: RequestedEnvironment[],
   context: ManagedEnvironmentResolutionContext,
@@ -67,7 +76,7 @@ async function resolveStoredObject(
   context: ManagedEnvironmentResolutionContext,
 ): Promise<{ version: string; objectPath: string }> {
   const version = selection.requestedVersion;
-  if (!version) throw new Error(`${selection.id} requires an exact version for a managed environment`);
+  if (!version) throw new Error(managedExactVersionMessage([selection.id]));
   const objectPath = await context.store.resolve(context.platform, selection.id, version);
   if (!objectPath) {
     throw new Error(

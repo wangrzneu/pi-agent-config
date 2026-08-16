@@ -2,7 +2,10 @@ import type { DevelopmentEnvironmentsConfig, EnvironmentInstallMode } from "../c
 import { installTrustedRuntime } from "./artifact-catalog.ts";
 import type { RuntimeInstallerOptions } from "./installer.ts";
 import { resolveLocalEnvironments } from "./local-resolver.ts";
-import { resolveManagedEnvironmentPlan } from "./managed-resolver.ts";
+import {
+  managedExactVersionMessage,
+  resolveManagedEnvironmentPlan,
+} from "./managed-resolver.ts";
 import { prepareAppleProjectState } from "./project-state.ts";
 import {
   provisionManagedObjects,
@@ -66,7 +69,7 @@ export class SandboxEnvironmentSessionController {
     const unpinned = requested.filter((request) => !request.requestedVersion);
     if (unpinned.length > 0) {
       throw new Error(
-        `Apple Container managed runtimes require an exact version: ${unpinned.map((request) => request.id).join(", ")}. Pin each with --sandbox-env ${unpinned.map((request) => `${request.id}@<version>`).join(",")} or developmentEnvironments.profiles versions, or use the Process backend.`,
+        `Apple Container cannot reuse host-local runtimes; the selection must be pinned. ${managedExactVersionMessage(unpinned.map((request) => request.id))} Use the Process backend for host-local interpreters.`,
       );
     }
     if (!this.options.managedResolver) {

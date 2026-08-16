@@ -437,26 +437,32 @@ export function registerSandboxExtension(
         resolutionContext,
       );
 
-      // Apple managed runtimes can only be served with exact versions (the
-      // Linux guest cannot reuse a host-local interpreter). In auto mode a
-      // version-less selection therefore resolves locally via the Process
-      // backend rather than surfacing a misleading VM fallback warning.
-      const autoPrefersApple = requestedEnvironments.every((request) => request.requestedVersion !== undefined);
+      // Apple managed runtimes require exact versions (the Linux guest cannot
+      // reuse a host-local interpreter). In auto mode the outcome is resolved
+      // explicitly so a version-less selection resolves locally via Process
+      // without surfacing a misleading VM fallback warning.
+      type AutoAppleOutcome =
+        | { kind: "resolved"; plan?: EnvironmentPlan }
+        | { kind: "failed"; reason: string }
+        | { kind: "skipped" };
 
       let processEnvironmentPlan: EnvironmentPlan | undefined;
       let appleEnvironmentPlan: EnvironmentPlan | undefined;
-      let appleEnvironmentError: unknown;
+      let autoAppleOutcome: AutoAppleOutcome = { kind: "skipped" };
       if (requestedBackend === "process") {
         processEnvironmentPlan = await resolveProcessEnvironmentPlan();
       } else if (requestedBackend === "apple-container") {
         appleEnvironmentPlan = await resolveAppleEnvironmentPlan();
-      } else if (requestedEnvironments.length > 0 && autoPrefersApple) {
+      } else if (requestedEnvironments.length === 0) {
+        autoAppleOutcome = { kind: "resolved" };
+      } else if (requestedEnvironments.every((request) => request.requestedVersion !== undefined)) {
         try {
-          appleEnvironmentPlan = await resolveAppleEnvironmentPlan();
+          autoAppleOutcome = { kind: "resolved", plan: await resolveAppleEnvironmentPlan() };
         } catch (error) {
-          appleEnvironmentError = error;
+          autoAppleOutcome = { kind: "failed", reason: errorMessage(error) };
         }
       }
+
       let effectiveBackend: EffectiveSandboxBackend = "process";
       let fallbackReason: string | undefined;
       if (requestedBackend === "process") {
@@ -465,19 +471,19 @@ export function registerSandboxExtension(
         await appleContainer.preflight(loaded.config.isolation.appleContainer, ctx.cwd);
         effectiveBackend = "apple-container";
         activeEnvironmentPlan = appleEnvironmentPlan;
-      } else if (appleEnvironmentError !== undefined) {
-        fallbackReason = `managed Apple environment unavailable: ${errorMessage(appleEnvironmentError)}`;
+      } else if (autoAppleOutcome.kind === "failed") {
+        fallbackReason = `managed Apple environment unavailable: ${autoAppleOutcome.reason}`;
         processEnvironmentPlan = await resolveProcessEnvironmentPlan();
         activeEnvironmentPlan = processEnvironmentPlan;
         ctx.ui.notify(
           `${fallbackReason}. Falling back to the Process sandbox.`,
           "warning",
         );
-      } else if (appleEnvironmentPlan !== undefined || requestedEnvironments.length === 0) {
+      } else if (autoAppleOutcome.kind === "resolved") {
         try {
           await appleContainer.preflight(loaded.config.isolation.appleContainer, ctx.cwd);
           effectiveBackend = "apple-container";
-          activeEnvironmentPlan = appleEnvironmentPlan;
+          activeEnvironmentPlan = autoAppleOutcome.plan;
         } catch (error) {
           fallbackReason = errorMessage(error);
           processEnvironmentPlan = await resolveProcessEnvironmentPlan();

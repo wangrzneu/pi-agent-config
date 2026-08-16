@@ -77,7 +77,10 @@ test("managed resolver fails closed for unpinned or missing objects", async () =
   await store.initialize();
   await assert.rejects(
     resolveManagedEnvironmentPlan([{ id: "go" }], { store, platform: "linux-arm64" }),
-    /requires an exact version/,
+    (error) => (
+      /require an exact version: go/.test(error.message)
+        && /--sandbox-env go@<version>/.test(error.message)
+    ),
   );
   await assert.rejects(
     resolveManagedEnvironmentPlan([{ id: "go", requestedVersion: "1.24.2" }], { store, platform: "linux-arm64" }),
