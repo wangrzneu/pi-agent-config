@@ -30,7 +30,7 @@ Example:
 
 ```bash
 pi --sandbox-mode apple-container \
-  --sandbox-env go@1.24.2,python@3.13.2,node@22.14.0,pnpm@10.6.0,kubectl@1.32.3
+  --sandbox-env go@1.26.6,python@3.13.9,node@26.5.0,pnpm@10.33.0,kubectl@1.29.0
 ```
 
 ## Current state
@@ -51,7 +51,7 @@ The startup selector, local and managed resolvers, immutable store, restricted
 tar.gz installer, and Kubernetes capability broker are implemented. Official
 manifests cover Go, Node.js, pnpm, and kubectl for supported Darwin/Linux and
 arm64/x64 targets; the pinned Python catalog uses checksum-verified Astral
-`python-build-standalone` archives for `3.11.11`, `3.12.9`, and `3.13.2`.
+`python-build-standalone` archives for `3.11.11`, `3.12.9`, and `3.13.9`.
 Runtime leases and automatic
 quota/retention LRU pruning are active. Apple projects receive a persistent
 trusted-bootstrap Python venv and isolated pnpm store, and `/sandbox env`
@@ -60,7 +60,7 @@ provides status, listing, and pruning commands.
 ## Domain model
 
 A **Profile** identifies one selected capability and exact version, for example
-`go@1.24.2` or `pnpm@10.6.0`.
+`go@1.26.6` or `pnpm@10.33.0`.
 
 A **Selection** is the set of Profiles requested for one sandbox session. A
 language may occur at most once. pnpm requires a compatible Node.js Profile.
@@ -97,11 +97,11 @@ current initialization.
       "retentionDays": 30
     },
     "profiles": {
-      "go": { "version": "1.24.2", "source": "auto" },
-      "python": { "version": "3.13.2", "source": "auto" },
-      "node": { "version": "22.14.0", "source": "auto" },
-      "pnpm": { "version": "10.6.0", "storeScope": "project" },
-      "kubectl": { "version": "1.32.3", "source": "auto" }
+      "go": { "version": "1.26.6", "source": "auto" },
+      "python": { "version": "3.13.9", "source": "auto" },
+      "node": { "version": "26.5.0", "source": "auto" },
+      "pnpm": { "version": "10.33.0", "storeScope": "project" },
+      "kubectl": { "version": "1.29.0", "source": "auto" }
     }
   },
   "kubernetes": {
@@ -436,7 +436,7 @@ Completed:
    sandbox-restricted archive extraction.
 7. Apple private bridge-interface Kubernetes gateway and startup context
    selector without a public listener.
-8. Pinned relocatable Python catalog (`3.11.11`/`3.12.9`/`3.13.2`) with
+8. Pinned relocatable Python catalog (`3.11.11`/`3.12.9`/`3.13.9`) with
    cross-platform manifest coverage.
 9. Apple project-scoped trusted-bootstrap Python venv and isolated pnpm store.
 10. Environment and Kubernetes session controllers extracted from the extension

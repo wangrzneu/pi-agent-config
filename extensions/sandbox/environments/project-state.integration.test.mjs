@@ -29,9 +29,9 @@ integrationTest("Apple Container creates and reuses a project-scoped Python venv
     image: process.env.PI_SANDBOX_TEST_IMAGE ?? DEFAULT_SANDBOX_CONFIG.isolation.appleContainer.image,
   };
   try {
-    await installTrustedRuntime(store, "python", "3.13.2", "linux-arm64");
+    await installTrustedRuntime(store, "python", "3.13.9", "linux-arm64");
     const plan = await resolveManagedEnvironmentPlan([
-      { id: "python", requestedVersion: "3.13.2" },
+      { id: "python", requestedVersion: "3.13.9" },
     ], { store, platform: "linux-arm64" });
     await prepareAppleProjectState(plan, { workspace, root: projectRoot });
     await controller.preflight(container, workspace);

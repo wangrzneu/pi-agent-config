@@ -14,7 +14,7 @@ const MAX_MANIFEST_BYTES = 8 * 1024 * 1024;
 const PYTHON_STANDALONE_RELEASES: Readonly<Record<string, string>> = {
   "3.11.11": "20250212",
   "3.12.9": "20250212",
-  "3.13.2": "20250212",
+  "3.13.9": "20251014",
 };
 
 export type TrustedRuntimeManifest = ArchiveRuntimeManifest | RawRuntimeManifest;
@@ -82,12 +82,15 @@ async function resolveGo(
   if (!Array.isArray(releases)) throw new Error("Go release manifest has an invalid shape");
   const release = releases.find((candidate) => isRecord(candidate) && candidate.version === `go${version}`);
   const files = isRecord(release) && Array.isArray(release.files) ? release.files : [];
-  const filename = `go${version}.${target.os}-${target.arch}.tar.gz`;
+  // go.dev names the x64 target amd64, while the catalog's internal platform
+  // spelling follows Node.js (x64). Translate at this boundary only.
+  const goArch = target.arch === "x64" ? "amd64" : target.arch;
+  const filename = `go${version}.${target.os}-${goArch}.tar.gz`;
   const artifact = files.find((candidate) => (
     isRecord(candidate)
     && candidate.filename === filename
     && candidate.os === target.os
-    && candidate.arch === target.arch
+    && candidate.arch === goArch
     && candidate.kind === "archive"
   ));
   const sha256 = isRecord(artifact) ? artifact.sha256 : undefined;
@@ -222,7 +225,9 @@ async function resolveKubectl(
   target: CatalogTarget,
   options: ArtifactCatalogOptions,
 ): Promise<RawRuntimeManifest> {
-  const base = `https://dl.k8s.io/release/v${version}/bin/${target.os}/${target.arch}/kubectl`;
+  // dl.k8s.io uses amd64 for the x64 target (matching go.dev, not Node.js).
+  const kubernetesArch = target.arch === "x64" ? "amd64" : target.arch;
+  const base = `https://dl.k8s.io/release/v${version}/bin/${target.os}/${kubernetesArch}/kubectl`;
   const sha256 = (await fetchTrustedText(`${base}.sha256`, new Set(["dl.k8s.io"]), options)).trim();
   assertDigest(sha256, `kubectl ${version}`);
   return {

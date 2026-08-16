@@ -16,6 +16,7 @@ RUN printf '%s\n' \
     ca-certificates \
     curl \
     git \
+    libatomic1 \
     ripgrep \
     socat \
   && rm -rf /var/lib/apt/lists/*

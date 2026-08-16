@@ -32,11 +32,11 @@ integrationTest("official pnpm package installs and executes in Apple Container"
     image: process.env.PI_SANDBOX_TEST_IMAGE ?? DEFAULT_SANDBOX_CONFIG.isolation.appleContainer.image,
   };
   try {
-    await installTrustedRuntime(store, "node", "22.14.0", "linux-arm64");
-    await installTrustedRuntime(store, "pnpm", "10.6.0", "linux-arm64");
+    await installTrustedRuntime(store, "node", "26.5.0", "linux-arm64");
+    await installTrustedRuntime(store, "pnpm", "10.33.0", "linux-arm64");
     const plan = await resolveManagedEnvironmentPlan([
-      { id: "node", requestedVersion: "22.14.0" },
-      { id: "pnpm", requestedVersion: "10.6.0" },
+      { id: "node", requestedVersion: "26.5.0" },
+      { id: "pnpm", requestedVersion: "10.33.0" },
     ], { store, platform: "linux-arm64" });
     await prepareAppleProjectState(plan, { workspace, root: projectRoot });
     await controller.preflight(container, workspace);
@@ -55,7 +55,7 @@ integrationTest("official pnpm package installs and executes in Apple Container"
     });
     const output = Buffer.concat(chunks).toString("utf8");
     assert.equal(result.exitCode, 0, output);
-    assert.match(output, /10\.6\.0/);
+    assert.match(output, /10\.33\.0/);
     assert.match(output, /\/var\/pi-env\/pnpm-store/);
   } finally {
     await controller.stopAll(container.binary);
@@ -79,9 +79,9 @@ integrationTest("official Node.js glibc artifact executes with the Debian bootst
     image: process.env.PI_SANDBOX_TEST_IMAGE ?? DEFAULT_SANDBOX_CONFIG.isolation.appleContainer.image,
   };
   try {
-    await installTrustedRuntime(store, "node", "22.14.0", "linux-arm64");
+    await installTrustedRuntime(store, "node", "26.5.0", "linux-arm64");
     const plan = await resolveManagedEnvironmentPlan([
-      { id: "node", requestedVersion: "22.14.0" },
+      { id: "node", requestedVersion: "26.5.0" },
     ], { store, platform: "linux-arm64" });
     await controller.preflight(container, workspace);
     const operations = createAppleContainerBashOperations(controller, {
@@ -99,7 +99,7 @@ integrationTest("official Node.js glibc artifact executes with the Debian bootst
     });
     const output = Buffer.concat(chunks).toString("utf8");
     assert.equal(result.exitCode, 0, output);
-    assert.match(output, /v22\.14\.0/);
+    assert.match(output, /v26\.5\.0/);
   } finally {
     await controller.stopAll(container.binary);
     await tracker.stopAll();
@@ -159,7 +159,7 @@ integrationTest("official Go, Node.js, and kubectl artifacts install and execute
   const workspace = await mkdtemp(join(tmpdir(), "pi-real-runtime-workspace-"));
   const storeRoot = await mkdtemp(join(tmpdir(), "pi-real-runtime-store-"));
   const store = new EnvironmentStore(storeRoot);
-  const versions = { go: "1.24.2", python: "3.13.2", node: "22.14.0", kubectl: "1.32.3" };
+  const versions = { go: "1.26.6", python: "3.13.9", node: "26.5.0", kubectl: "1.29.0" };
   const controller = new AppleContainerController();
   const tracker = new SandboxProcessTracker();
   const container = {
@@ -198,9 +198,9 @@ integrationTest("official Go, Node.js, and kubectl artifacts install and execute
     );
     const output = Buffer.concat(chunks).toString("utf8");
     assert.equal(result.exitCode, 0, output);
-    assert.match(output, /go version go1\.24\.2 linux\/arm64/);
-    assert.match(output, /Python 3\.13\.2/);
-    assert.match(output, /v1\.32\.3/);
+    assert.match(output, /go version go1\.26\.6 linux\/arm64/);
+    assert.match(output, /Python 3\.13\.9/);
+    assert.match(output, /v1\.29\.0/);
   } finally {
     await controller.stopAll(container.binary);
     await tracker.stopAll();
