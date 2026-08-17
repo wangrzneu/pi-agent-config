@@ -68,7 +68,14 @@ Start the service in a normal host terminal:
 container system start
 ```
 
-Build the pinned guest image through an explicit HTTP CONNECT proxy reachable from the Apple Container network. The gateway IP comes from `container network inspect default` (it has drifted between `192.168.64.1` and `192.168.65.1` across service restarts); the proxy port is whatever the local proxy actually listens on. Surge by default listens on `6152` (HTTP) / `6153` (SOCKS5); confirm with `lsof -nP -iTCP -sTCP:LISTEN | grep -i surge` before reusing:
+Build the pinned guest image through an explicit HTTP CONNECT proxy reachable from the Apple Container network. `extensions/sandbox/container/find-build-proxy.mjs` locates a working proxy automatically (it resolves the current NAT gateway and probes Surge's HTTP proxy port), so the common case is:
+
+```bash
+PI_SANDBOX_BUILD_PROXY=$(node extensions/sandbox/container/find-build-proxy.mjs) \
+  extensions/sandbox/container/build.sh
+```
+
+Use an explicit URL when the auto-detection is not applicable (the gateway has drifted between `192.168.64.1` and `192.168.65.1` across service restarts; Surge's default HTTP proxy port is `6152` with a per-profile override like `8234`):
 
 ```bash
 PI_SANDBOX_BUILD_PROXY=http://192.168.65.1:6152 \
