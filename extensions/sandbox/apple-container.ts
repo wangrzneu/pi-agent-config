@@ -55,8 +55,11 @@ export class AppleContainerController implements AppleContainerLifecycle {
     }
     if (!existsSync(config.binary)) throw new Error(`Apple container CLI not found: ${config.binary}`);
     const version = await captureCommand(config.binary, ["--version"]);
-    if (!/\b0\.10\./.test(version)) {
-      throw new Error(`Apple container CLI 0.10.x is required; found: ${version.trim()}`);
+    // The launch-plan flags used by this extension are stable across the
+    // 0.10.x and 1.x Apple Container releases; accept both while rejecting
+    // anything else fail-closed.
+    if (!/\b(?:0\.10|1)\.\d/.test(version)) {
+      throw new Error(`Apple container CLI 0.10.x or 1.x is required; found: ${version.trim()}`);
     }
     await captureCommand(config.binary, ["system", "status", "--format", "json"]);
     await captureCommand(config.binary, ["image", "inspect", config.image]);
@@ -312,9 +315,8 @@ export function compileGuestPolicy(
       allowMachLookup: undefined,
       // Apple Container's guest kernel rejects the nested user namespace used
       // by ASRT's apply-seccomp helper. The VM exposes no host Unix sockets, so
-      // host IPC is already separated by the stronger VM boundary. Keep all
-      // other guest Process restrictions (bwrap fs/PID/net namespaces and
-      // proxy-only egress) without opting into weaker nested filesystem mode.
+      // host IPC is already separated by the stronger VM boundary. Keep the
+      // proxy-only egress restriction but allow sockets inside the guest.
       allowAllUnixSockets: true,
     },
     filesystem: {
@@ -351,7 +353,12 @@ export function compileGuestPolicy(
     },
     credentials: structuredClone(config.credentials),
     ignoreViolations: structuredClone(config.ignoreViolations),
-    enableWeakerNestedSandbox: false,
+    // Apple Container 1.x no longer lets the guest's bubblewrap mount proc
+    // (no privileged nested namespaces), so ASRT must use its Docker/VM
+    // weaker-nested mode. The Linux VM itself is the primary isolation
+    // boundary, so this is acceptable; host IPC/filesystem never surfaces in
+    // the guest. See @anthropic-ai/sandbox-runtime README (`n` option).
+    enableWeakerNestedSandbox: true,
   };
 }
 

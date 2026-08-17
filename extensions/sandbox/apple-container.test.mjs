@@ -117,7 +117,7 @@ test("guest Process policy preserves network rules and compiles Linux filesystem
   assert.ok(policy.filesystem.allowRead.includes("/reference"));
   assert.ok(policy.filesystem.allowRead.includes("/usr"));
   assert.ok(policy.filesystem.allowWrite.includes("/workspace"));
-  assert.equal(policy.enableWeakerNestedSandbox, false);
+  assert.equal(policy.enableWeakerNestedSandbox, true);
 });
 
 test("guest policy grants exact environment roots and only declared writable mounts", () => {
