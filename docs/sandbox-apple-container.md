@@ -68,14 +68,14 @@ Start the service in a normal host terminal:
 container system start
 ```
 
-Build the pinned guest image through an explicit HTTP CONNECT proxy reachable from the Apple Container network:
+Build the pinned guest image through an explicit HTTP CONNECT proxy reachable from the Apple Container network. The gateway IP comes from `container network inspect default` (it has drifted between `192.168.64.1` and `192.168.65.1` across service restarts); the proxy port is whatever the local proxy actually listens on. Surge by default listens on `6152` (HTTP) / `6153` (SOCKS5); confirm with `lsof -nP -iTCP -sTCP:LISTEN | grep -i surge` before reusing:
 
 ```bash
-PI_SANDBOX_BUILD_PROXY=http://192.168.65.1:8234 \
+PI_SANDBOX_BUILD_PROXY=http://192.168.65.1:6152 \
   extensions/sandbox/container/build.sh
 ```
 
-`PI_CONTAINER_BINARY` and `PI_SANDBOX_IMAGE` optionally override the default `/opt/homebrew/bin/container` binary and `local/pi-sandbox-asrt:0.0.70` tag. The proxy is mandatory because transparent host TUN/Fake-IP routing is not inherited by the build VM. On this machine Surge exposes HTTP CONNECT on port `8234`, but Surge may reset connections sourced from the VM subnet (`192.168.65.0/24`); when that happens, run the bundled host-side tunnel proxy (it binds to the current NAT gateway and forwards to the host's own egress) and point the build at it:
+`PI_CONTAINER_BINARY` and `PI_SANDBOX_IMAGE` optionally override the default `/opt/homebrew/bin/container` binary and `local/pi-sandbox-asrt:0.0.70` tag. The proxy is mandatory because transparent host TUN/Fake-IP routing is not inherited by the build VM. If the local proxy accepts only loopback (`127.0.0.1`) or resets connections sourced from the VM subnet, run the bundled host-side tunnel proxy instead:
 
 ```bash
 node extensions/sandbox/container/build-tunnel-proxy.mjs &
