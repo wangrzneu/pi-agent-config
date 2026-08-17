@@ -75,7 +75,15 @@ PI_SANDBOX_BUILD_PROXY=http://192.168.65.1:8234 \
   extensions/sandbox/container/build.sh
 ```
 
-`PI_CONTAINER_BINARY` and `PI_SANDBOX_IMAGE` optionally override the default `/opt/homebrew/bin/container` binary and `local/pi-sandbox-asrt:0.0.70` tag. The proxy is mandatory because transparent host TUN/Fake-IP routing is not inherited by the build VM. On this machine Surge exposes HTTP CONNECT on port `8234`, but Surge may reset connections sourced from the VM subnet (`192.168.65.0/24`); in that case run a small host-side tunnel proxy bound to the VM gateway (e.g. port `8236`) that forwards to the host's own egress. Proxy values are passed as BuildKit's predefined upper- and lowercase proxy build arguments rather than persisted in the Containerfile.
+`PI_CONTAINER_BINARY` and `PI_SANDBOX_IMAGE` optionally override the default `/opt/homebrew/bin/container` binary and `local/pi-sandbox-asrt:0.0.70` tag. The proxy is mandatory because transparent host TUN/Fake-IP routing is not inherited by the build VM. On this machine Surge exposes HTTP CONNECT on port `8234`, but Surge may reset connections sourced from the VM subnet (`192.168.65.0/24`); when that happens, run the bundled host-side tunnel proxy (it binds to the current NAT gateway and forwards to the host's own egress) and point the build at it:
+
+```bash
+node extensions/sandbox/container/build-tunnel-proxy.mjs &
+PI_SANDBOX_BUILD_PROXY=http://192.168.65.1:8236 \
+  extensions/sandbox/container/build.sh
+```
+
+The tunnel auto-detects the gateway via `container network inspect default` (override with `PI_BUILD_TUNNEL_HOST`/`PI_BUILD_TUNNEL_PORT`). Proxy values are passed as BuildKit's predefined upper- and lowercase proxy build arguments rather than persisted in the Containerfile.
 
 The Debian-slim/glibc image contains Node.js, ASRT 0.0.70, bubblewrap, seccomp support, socat, ripgrep, bash, git, and CA certificates. glibc is intentional so official managed Node.js Linux/arm64 distributions use their supported ABI. `package-lock.json` pins transitive npm dependencies.
 
