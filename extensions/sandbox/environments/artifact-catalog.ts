@@ -157,12 +157,21 @@ async function resolvePython(
   const filename = `cpython-${version}+${release}-${targetName}-install_only_stripped.tar.gz`;
   const base = `https://github.com/astral-sh/python-build-standalone/releases/download/${release}`;
   const artifactUrl = `${base}/${encodeURIComponent(filename)}`;
-  const sha256 = (await fetchTrustedText(
-    `${artifactUrl}.sha256`,
+  // astral-sh publishes one SHA256SUMS manifest per release instead of a
+  // per-asset .sha256 sidecar. Parse the relevant line so a missing sidecar
+  // cannot silently downgrade to unverified content.
+  const checksums = await fetchTrustedText(
+    `${base}/SHA256SUMS`,
     new Set(["github.com", "release-assets.githubusercontent.com"]),
     options,
-  )).trim();
+  );
+  const lines = checksums.split(/\r?\n/).filter((line) => line.trim().endsWith(`  ${filename}`));
+  if (lines.length !== 1) throw new Error(`Python checksum manifest does not contain exactly one ${filename}`);
+  const [sha256, listedFilename, extra] = lines[0].trim().split(/\s+/);
   assertDigest(sha256, `Python ${version}`);
+  if (listedFilename !== filename || extra !== undefined) {
+    throw new Error(`Python checksum manifest has an invalid entry for ${filename}`);
+  }
   return {
     profile: "python",
     version,

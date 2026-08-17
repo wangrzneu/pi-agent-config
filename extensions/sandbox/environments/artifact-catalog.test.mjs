@@ -41,8 +41,18 @@ test("trusted catalog resolves exact runtime artifacts across platforms and prof
       return response(`${NODE_DIGEST}  node-v26.5.0-linux-arm64.tar.gz\n`, value);
     }
     if (value.endsWith("kubectl.sha256")) return response(`${KUBECTL_DIGEST}\n`, value);
-    if (value.includes("python-build-standalone") && value.endsWith(".sha256")) {
-      return response(`${PYTHON_DIGEST}\n`, value);
+    if (value.includes("python-build-standalone") && value.endsWith("/SHA256SUMS")) {
+      const tag = value.split("/download/")[1].split("/SHA256SUMS")[0];
+      const targets = [
+        "aarch64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
+        "x86_64-unknown-linux-gnu",
+      ];
+      const versions = tag === "20251014" ? ["3.13.9"] : ["3.11.11", "3.12.9"];
+      const lines = versions.flatMap((version) => targets.map((target) => (
+        `${PYTHON_DIGEST}  cpython-${version}+${tag}-${target}-install_only_stripped.tar.gz\n`
+      )));
+      return response(lines.join(""), value);
     }
     if (value.includes("registry.npmjs.org/pnpm/")) {
       return response(JSON.stringify({
