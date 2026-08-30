@@ -28,7 +28,6 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | 🌐 **SSH tools** | Lightweight, capability-scoped SSH execution, transfer, and jobs |
 | 🛡️ **Sandbox** | Fail-closed OS sandbox for local shell commands |
 | 🧠 **External memory** | Opt-in synced-folder memory captured at compaction with two-stage recall |
-| 🔁 **Loop guard** | Detect repeated tool calls *or repeated output phrases* and interrupt stuck agent loops |
 | 🧭 **Workflow skill** | Concise default working guidelines |
 | 🧩 **Prompts** | On-demand review / debugging / architecture prompts |
 | 📚 **Docs** | Reference docs for exploration, external projects, and security |
@@ -44,7 +43,6 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | `extensions/ssh-tools/` | Dynamically discovered SSH execution, transfer, and remote job tools |
 | `extensions/sandbox/` | Fail-closed OS sandboxing for local shell commands |
 | `extensions/external-memory/` | Opt-in synced-folder memory captured at compaction with two-stage recall |
-| `extensions/loop-guard/` | Detect repeated tool calls and interrupt stuck agent loops |
 | `skills/pi-workflow/` | Concise default working guidelines |
 | `prompts/` | On-demand prompts for review, debugging, and architecture tasks |
 | `docs/` | Reference documentation for code exploration, external projects, and security boundaries |
@@ -70,7 +68,6 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | `docs/grok-build-sandbox.md` | Research: how Grok Build uses sandboxing (from its open-source Rust CLI) |
 | `docs/sandbox-fuse-gate.md` | Feasibility: FUSE-based ~ interception + authorized access (verdict: macOS no, Linux only if runtime grants become a hard need) |
 | `docs/sandbox-credential-clis.md` | Running credential-needing CLIs (aws/gh/gcloud) in the sandbox: credential masking + TLS termination + SigV4 re-signing |
-| `docs/agent-loop-handling.md` | Research: how Grok Build / Claude Code / Codex / AutoGen handle agent loops (feeds loop-guard optimization) |
 | `docs/exploration.md` | Code exploration guidance |
 | `docs/external-projects.md` | Working with external projects |
 
@@ -209,26 +206,6 @@ Design, Plan, Implement, Test, Review, Fix, or Explore. The selected model perfo
 classification request with extended thinking disabled, while the working message shows the active
 tool detail. Invalid, failed, or timed-out classifications are omitted without a fallback status.
 Classification results are not added to the session or main model context.
-
-### 🔁 Loop guard
-
-Disabled by default. While an agent run is active, the loop guard tracks tool calls **and the model's
-streamed output** and detects stuck loops:
-
-- the same tool call repeated in a row (5+, configurable);
-- an identical 2/3-step call cycle;
-- a run that exceeds 120 tool calls;
-- the same sentence or phrase repeated in the streamed output (6+, configurable) — this catches a
-  model that is verbally stuck repeating an intent ("now run lldb…", "now run lldb…") without ever
-  making the tool call.
-
-On detection it asks whether to abort the run (and aborts directly in print/RPC mode). Opt in per
-session with `/loop-guard on` (or permanently via the extension's `defaultMode` setting). Use
-`/loop-guard` to inspect state, or `off|on|reset` to disable, re-enable, or clear counters.
-
-It is off by default because the phrase-repetition heuristic is string-based and can false-positive
-on legitimate code (e.g. several identical `return err` lines in one window); a fix that is safe to
-enable out of the box needs linguistic judgment rather than string matching.
 
 ### 📖 Markdown viewer
 
