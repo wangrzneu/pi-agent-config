@@ -5,7 +5,6 @@ import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { SANDBOX_TEMP_ROOT } from "./sandbox-paths.ts";
 import { errorMessage } from "./util.ts";
 
-export type SandboxBackendMode = "auto" | "process" | "apple-container";
 export type EnvironmentInstallMode = "never" | "ask" | "auto";
 export type EnvironmentProfileSource = "auto" | "local" | "managed";
 
@@ -42,23 +41,8 @@ export interface KubernetesConfig {
   credentialMode: "host-broker";
 }
 
-export interface AppleContainerConfig {
-  binary: string;
-  image: string;
-  platform: "linux/arm64";
-  shell: string;
-  cpus: number;
-  memory: string;
-  pullPolicy: "never";
-  workspaceMode: "transactional-apfs";
-}
-
 export interface SandboxConfig extends SandboxRuntimeConfig {
   enabled: boolean;
-  isolation: {
-    mode: SandboxBackendMode;
-    appleContainer: AppleContainerConfig;
-  };
   /**
    * Commands that always run on the host (after session-level approval) because
    * their default configuration lives in `~`-homed credential files that the
@@ -185,22 +169,6 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
   credentials: {
     envVars: SENSITIVE_ENV_VARS.map((name) => ({ name, mode: "deny" as const })),
   },
-  isolation: {
-    // Auto-select the additional Apple VM layer when every prerequisite is
-    // available. Otherwise startup reports the failed check and safely falls
-    // back to the Process sandbox; it never falls back to an unsandboxed shell.
-    mode: "auto",
-    appleContainer: {
-      binary: "/opt/homebrew/bin/container",
-      image: "local/pi-sandbox-asrt:0.0.70",
-      platform: "linux/arm64",
-      shell: "/bin/bash",
-      cpus: 2,
-      memory: "2g",
-      pullPolicy: "never",
-      workspaceMode: "transactional-apfs",
-    },
-  },
   developmentEnvironments: {
     promptOnStart: true,
     selected: [],
@@ -270,27 +238,6 @@ export function mergeSandboxConfig(
     } as KubernetesConfig;
   }
 
-  if (isRecord(overrides.isolation)) {
-    const isolation = overrides.isolation;
-    const appleContainer = isRecord(isolation.appleContainer)
-      ? isolation.appleContainer
-      : undefined;
-    if (isolation.mode !== undefined) {
-      merged.isolation.mode = structuredClone(isolation.mode) as SandboxBackendMode;
-    } else if (appleContainer?.enabled !== undefined) {
-      // Compatibility with the original `isolation.appleContainer.enabled`
-      // setting. New configuration should use the backend domain concept.
-      merged.isolation.mode = legacyAppleContainerMode(appleContainer.enabled);
-    }
-    if (appleContainer !== undefined) {
-      const { enabled: _legacyEnabled, ...containerOverrides } = appleContainer;
-      merged.isolation.appleContainer = {
-        ...merged.isolation.appleContainer,
-        ...structuredClone(containerOverrides),
-      } as AppleContainerConfig;
-    }
-  }
-
   return merged;
 }
 
@@ -308,6 +255,7 @@ export function loadSandboxConfig(
 
   const globalConfig = readConfigFile(globalPath, warnings);
   if (globalConfig !== undefined) {
+    assertIsolationRemoved(globalConfig, globalPath, warnings);
     try {
       config = mergeSandboxConfig(config, globalConfig);
       loadedFrom.push(globalPath);
@@ -319,6 +267,7 @@ export function loadSandboxConfig(
   if (projectTrusted) {
     const projectConfig = readConfigFile(projectPath, warnings);
     if (projectConfig !== undefined) {
+      assertIsolationRemoved(projectConfig, projectPath, warnings);
       try {
         config = mergeSandboxConfig(config, projectConfig);
         loadedFrom.push(projectPath);
@@ -443,11 +392,24 @@ function mergeDevelopmentEnvironmentConfig(
   }
 }
 
-function legacyAppleContainerMode(value: unknown): SandboxBackendMode {
-  if (value === true) return "apple-container";
-  if (value === false) return "process";
-  if (value === "auto") return "auto";
-  return value as SandboxBackendMode;
+function assertIsolationRemoved(
+  overrides: Record<string, unknown>,
+  path: string,
+  warnings: string[],
+): void {
+  if (overrides.isolation === undefined) return;
+  const isolation = isRecord(overrides.isolation) ? overrides.isolation : undefined;
+  const appleContainer = isolation && isRecord(isolation.appleContainer)
+    ? isolation.appleContainer
+    : undefined;
+  if (isolation?.mode === "apple-container" || appleContainer?.enabled === true) {
+    throw new Error(
+      `Apple Container was removed; ${path} still requests it. Delete the isolation section from sandbox.json.`,
+    );
+  }
+  warnings.push(
+    `Ignored isolation configuration in ${path}; Apple Container was removed and the Process sandbox is the only backend`,
+  );
 }
 
 function mergeSection(

@@ -18,13 +18,7 @@ import {
 import {
   loadSandboxConfig,
   type LoadedSandboxConfig,
-  type SandboxBackendMode,
 } from "./config.ts";
-import {
-  AppleContainerController,
-  createAppleContainerBashOperations,
-  type AppleContainerLifecycle,
-} from "./apple-container.ts";
 import { matchHostExecCommand } from "./host-escape.ts";
 import { loadGitIdentity, type GitIdentity } from "./git-identity.ts";
 import {
@@ -48,13 +42,11 @@ import {
   formatState,
   setStatus,
   STATUS_KEY,
-  type EffectiveSandboxBackend,
   type SandboxState,
 } from "./status.ts";
 import { errorMessage, unquote } from "./util.ts";
 import { installTrustedRuntime } from "./environments/artifact-catalog.ts";
 import { resolveLocalEnvironments } from "./environments/local-resolver.ts";
-import { resolveManagedEnvironmentPlan } from "./environments/managed-resolver.ts";
 import { createRestrictedArchiveExtractor } from "./environments/restricted-installer.ts";
 import { SandboxEnvironmentSessionController } from "./environments/session-controller.ts";
 import { resolveEnvironmentSelection } from "./environments/selection.ts";
@@ -69,8 +61,6 @@ import { discoverKubernetesContexts } from "./kubernetes/context-source.ts";
 import { KubernetesContextSelectionStore } from "./kubernetes/context-selection-store.ts";
 import { KubernetesSessionAccess } from "./kubernetes/session-access.ts";
 
-export { resolveAppleContainerHostGateway } from "./kubernetes/apple-bridge.ts";
-
 interface SandboxRuntime extends SandboxCommandRuntime {
   initialize(config: SandboxRuntimeConfig, ask?: SandboxAskCallback): Promise<void>;
   isSupportedPlatform(): boolean;
@@ -84,35 +74,15 @@ export default function sandboxExtension(pi: ExtensionAPI): void {
 export interface AuthorizationOptions {
   allowOsTemp?: boolean;
   piReadRoots?: string[];
-  /** Test seam for Apple Container prerequisite and lifecycle behavior. */
-  appleContainerController?: AppleContainerLifecycle;
   /** Test seam for local development-environment discovery. */
   environmentResolver?: typeof resolveLocalEnvironments;
-  /** Test seams for managed environment resolution and storage. */
-  managedEnvironmentResolver?: typeof resolveManagedEnvironmentPlan;
   environmentStore?: EnvironmentStore;
   environmentSelector?: typeof selectDevelopmentEnvironments;
   runtimeInstaller?: typeof installTrustedRuntime;
-  projectStateRoot?: string;
   /** Test seams for session-scoped Kubernetes access. */
   kubernetesContextDiscovery?: typeof discoverKubernetesContexts;
   kubernetesAccessFactory?: () => Promise<KubernetesSessionAccess>;
   kubernetesSelectionStore?: KubernetesContextSelectionStore;
-}
-
-export function resolveSandboxBackendMode(
-  flagValue: boolean | string | undefined,
-  configured: unknown,
-): SandboxBackendMode {
-  const hasFlag = flagValue !== undefined && flagValue !== false && flagValue !== "";
-  const candidate = hasFlag ? flagValue : configured;
-  if (candidate === "auto" || candidate === "process" || candidate === "apple-container") {
-    return candidate;
-  }
-  const source = hasFlag ? "--sandbox-mode" : "isolation.mode";
-  throw new Error(
-    `Invalid ${source} ${JSON.stringify(candidate)}; expected auto, process, or apple-container`,
-  );
 }
 
 export function defaultPiReadRoots(homeDir: string = homedir()): string[] {
@@ -140,18 +110,13 @@ export function registerSandboxExtension(
   authorizationOptions: AuthorizationOptions = {},
 ): void {
   const tracker = new SandboxProcessTracker();
-  const appleContainer = authorizationOptions.appleContainerController ?? new AppleContainerController();
   const environmentStore = authorizationOptions.environmentStore
     ?? new EnvironmentStore(join(getAgentDir(), "cache", "sandbox"));
-  const projectStateRoot = authorizationOptions.projectStateRoot
-    ?? join(getAgentDir(), "cache", "sandbox", "projects");
   const kubernetesSelectionStore = authorizationOptions.kubernetesSelectionStore
     ?? new KubernetesContextSelectionStore(join(getAgentDir(), "cache", "sandbox", "kubernetes-selections"));
   const environmentController = new SandboxEnvironmentSessionController({
     store: environmentStore,
-    projectStateRoot,
     localResolver: authorizationOptions.environmentResolver,
-    managedResolver: authorizationOptions.managedEnvironmentResolver,
     installer: authorizationOptions.runtimeInstaller,
   });
   const piReadRoots = authorizationOptions.piReadRoots ?? defaultPiReadRoots();
@@ -172,15 +137,12 @@ export function registerSandboxExtension(
     state: () => state.mode === "sandboxed"
       ? {
           active: true,
-          effectiveBackend: state.effectiveBackend,
           config: state.loaded.config.kubernetes,
         }
       : { active: false, config: state.loaded?.config.kubernetes },
     environmentPlan: () => activeEnvironmentPlan,
-    environmentResolver: authorizationOptions.environmentResolver,
     contextDiscovery: authorizationOptions.kubernetesContextDiscovery,
     accessFactory: authorizationOptions.kubernetesAccessFactory,
-    appleContainerBinary: () => state.loaded?.config.isolation.appleContainer.binary,
     selectionStore: kubernetesSelectionStore,
   });
   const processOperations = createSandboxedBashOperations(runtime, tracker, () => {
@@ -206,40 +168,11 @@ export function registerSandboxExtension(
     };
   }, () => gitIdentity, () => activeEnvironmentPlan?.env);
 
-  const commandOperations = (ctx: ExtensionContext) => {
-    if (state.mode !== "sandboxed" || state.effectiveBackend !== "apple-container") {
-      return processOperations;
-    }
-    const config = state.loaded.config;
-    return createAppleContainerBashOperations(appleContainer, {
-      tracker,
-      container: config.isolation.appleContainer,
-      policy: () => ({
-        config,
-        readGrants: readAuthorization.paths(),
-        writeGrants: writeAuthorization.paths(),
-      }),
-      gitIdentity: () => gitIdentity,
-      authorizeNetwork: (host, port) => authorizeNetworkDomain(
-        host,
-        port,
-        approvedNetworkDomains,
-        pendingNetworkApprovals,
-        ctx,
-      ),
-      environment: () => activeEnvironmentPlan,
-    });
-  };
 
   pi.registerFlag("no-sandbox", {
     description: "Explicitly run local bash commands without OS-level sandboxing",
     type: "boolean",
     default: false,
-  });
-
-  pi.registerFlag("sandbox-mode", {
-    description: "Sandbox backend: auto, process, or apple-container",
-    type: "string",
   });
 
   pi.registerFlag("sandbox-env", {
@@ -286,7 +219,7 @@ export function registerSandboxExtension(
       }
 
       const tool = state.mode === "sandboxed"
-        ? createBashToolDefinition(ctx.cwd, { operations: commandOperations(ctx) })
+        ? createBashToolDefinition(ctx.cwd, { operations: processOperations })
         : createBashToolDefinition(ctx.cwd);
       return tool.execute(id, params, signal, onUpdate, ctx);
     },
@@ -305,7 +238,7 @@ export function registerSandboxExtension(
   });
 
   pi.on("user_bash", (_event, ctx) => {
-    if (state.mode === "sandboxed") return { operations: commandOperations(ctx) };
+    if (state.mode === "sandboxed") return { operations: processOperations };
     if (state.mode === "blocked" || state.mode === "starting") {
       return {
         result: {
@@ -341,12 +274,24 @@ export function registerSandboxExtension(
       return;
     }
 
-    const loaded = loadSandboxConfig(
-      ctx.cwd,
-      getAgentDir(),
-      CONFIG_DIR_NAME,
-      ctx.isProjectTrusted(),
-    );
+    let loaded: LoadedSandboxConfig | undefined;
+    try {
+      loaded = loadSandboxConfig(
+        ctx.cwd,
+        getAgentDir(),
+        CONFIG_DIR_NAME,
+        ctx.isProjectTrusted(),
+      );
+    } catch (error) {
+      state = {
+        mode: "blocked",
+        reason: `initialization failed: ${errorMessage(error)}`,
+      };
+      setStatus(ctx, state);
+      const reason = state.reason.replace(/[.\s]+$/, "");
+      ctx.ui.notify(`Sandbox ${reason}. Bash is blocked; use --no-sandbox only for an explicit bypass.`, "error");
+      return;
+    }
     for (const warning of loaded.warnings) ctx.ui.notify(warning, "warning");
     await kubernetesController.initializeSession(ctx, loaded.config.kubernetes);
 
@@ -368,12 +313,7 @@ export function registerSandboxExtension(
       return;
     }
 
-    let requestedBackend: SandboxBackendMode | undefined;
     try {
-      requestedBackend = resolveSandboxBackendMode(
-        pi.getFlag("sandbox-mode"),
-        loaded.config.isolation.mode,
-      );
       let environmentFlag = pi.getFlag("sandbox-env");
       const hasEnvironmentFlag = typeof environmentFlag === "string"
         && environmentFlag.trim() !== "";
@@ -393,7 +333,6 @@ export function registerSandboxExtension(
       await ensureSandboxTempRoot();
       const {
         enabled: _enabled,
-        isolation: _isolation,
         hostExec: _hostExec,
         developmentEnvironments: _developmentEnvironments,
         kubernetes: _kubernetes,
@@ -429,83 +368,10 @@ export function registerSandboxExtension(
         installerOptions,
         approveInstall: approveManagedInstall,
       };
-      const resolveProcessEnvironmentPlan = () => environmentController.resolveProcess(
+      activeEnvironmentPlan = await environmentController.resolveProcess(
         requestedEnvironments,
         resolutionContext,
       );
-      const resolveAppleEnvironmentPlan = () => environmentController.resolveApple(
-        requestedEnvironments,
-        resolutionContext,
-      );
-
-      // Apple managed runtimes require exact versions (the Linux guest cannot
-      // reuse a host-local interpreter). In auto mode the outcome is resolved
-      // explicitly so a version-less selection resolves locally via Process
-      // without surfacing a misleading VM fallback warning.
-      type AutoAppleOutcome =
-        | { kind: "resolved"; plan?: EnvironmentPlan }
-        | { kind: "failed"; reason: string }
-        | { kind: "skipped" };
-
-      const unpinnedEnvironmentIds = requestedEnvironments
-        .filter((request) => request.requestedVersion === undefined)
-        .map((request) => request.id);
-
-      let processEnvironmentPlan: EnvironmentPlan | undefined;
-      let appleEnvironmentPlan: EnvironmentPlan | undefined;
-      let autoAppleOutcome: AutoAppleOutcome = { kind: "skipped" };
-      if (requestedBackend === "process") {
-        processEnvironmentPlan = await resolveProcessEnvironmentPlan();
-      } else if (requestedBackend === "apple-container") {
-        appleEnvironmentPlan = await resolveAppleEnvironmentPlan();
-      } else if (requestedEnvironments.length === 0) {
-        autoAppleOutcome = { kind: "resolved" };
-      } else if (unpinnedEnvironmentIds.length === 0) {
-        try {
-          autoAppleOutcome = { kind: "resolved", plan: await resolveAppleEnvironmentPlan() };
-        } catch (error) {
-          autoAppleOutcome = { kind: "failed", reason: errorMessage(error) };
-        }
-      }
-
-      let effectiveBackend: EffectiveSandboxBackend = "process";
-      let fallbackReason: string | undefined;
-      if (requestedBackend === "process") {
-        activeEnvironmentPlan = processEnvironmentPlan;
-      } else if (requestedBackend === "apple-container") {
-        await appleContainer.preflight(loaded.config.isolation.appleContainer, ctx.cwd);
-        effectiveBackend = "apple-container";
-        activeEnvironmentPlan = appleEnvironmentPlan;
-      } else if (autoAppleOutcome.kind === "failed") {
-        fallbackReason = `managed Apple environment unavailable: ${autoAppleOutcome.reason}`;
-        processEnvironmentPlan = await resolveProcessEnvironmentPlan();
-        activeEnvironmentPlan = processEnvironmentPlan;
-        ctx.ui.notify(
-          `${fallbackReason}. Falling back to the Process sandbox.`,
-          "warning",
-        );
-      } else if (autoAppleOutcome.kind === "resolved") {
-        try {
-          await appleContainer.preflight(loaded.config.isolation.appleContainer, ctx.cwd);
-          effectiveBackend = "apple-container";
-          activeEnvironmentPlan = autoAppleOutcome.plan;
-        } catch (error) {
-          fallbackReason = errorMessage(error);
-          processEnvironmentPlan = await resolveProcessEnvironmentPlan();
-          activeEnvironmentPlan = processEnvironmentPlan;
-          ctx.ui.notify(
-            `Apple Container prerequisites are not satisfied (${fallbackReason}). Falling back to the Process sandbox. Use --sandbox-mode apple-container to require VM isolation.`,
-            "warning",
-          );
-        }
-      } else {
-        processEnvironmentPlan = await resolveProcessEnvironmentPlan();
-        activeEnvironmentPlan = processEnvironmentPlan;
-        ctx.ui.notify(
-          `Using the Process sandbox instead of Apple Container because ${unpinnedEnvironmentIds.join(", ")} has no pinned version. Pin versions (--sandbox-env ${unpinnedEnvironmentIds.map((id) => `${id}@<version>`).join(",")}) to prefer Apple Container.`,
-          "info",
-        );
-      }
 
       await environmentController.activate(
         activeEnvironmentPlan,
@@ -515,19 +381,12 @@ export function registerSandboxExtension(
 
       state = {
         mode: "sandboxed",
-        reason: fallbackReason ? `active; automatic Process fallback: ${fallbackReason}` : "active",
+        reason: "active",
         loaded,
-        requestedBackend,
-        effectiveBackend,
         environmentPlan: activeEnvironmentPlan,
       };
       setStatus(ctx, state);
-      ctx.ui.notify(
-        effectiveBackend === "apple-container"
-          ? "Apple Container + Process sandbox initialized"
-          : "Process sandbox initialized",
-        "info",
-      );
+      ctx.ui.notify("Process sandbox initialized", "info");
       if (
         loaded.config.kubernetes.promptOnStart
         && event.reason === "startup"
@@ -547,7 +406,6 @@ export function registerSandboxExtension(
         mode: "blocked",
         reason: `initialization failed: ${errorMessage(error)}`,
         loaded,
-        requestedBackend,
       };
       setStatus(ctx, state);
       const reason = state.reason.replace(/[.\s]+$/, "");
@@ -558,8 +416,6 @@ export function registerSandboxExtension(
   pi.on("session_shutdown", async (event, ctx) => {
     await kubernetesController.stop();
     await environmentController.reset();
-    const containerBinary = state.loaded?.config.isolation.appleContainer.binary;
-    if (containerBinary) await appleContainer.stopAll(containerBinary);
     await tracker.stopAll();
     readAuthorization.revoke();
     writeAuthorization.revoke();

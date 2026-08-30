@@ -2,23 +2,13 @@ import type { DevelopmentEnvironmentsConfig, EnvironmentInstallMode } from "../c
 import { installTrustedRuntime } from "./artifact-catalog.ts";
 import type { RuntimeInstallerOptions } from "./installer.ts";
 import { resolveLocalEnvironments } from "./local-resolver.ts";
-import {
-  managedExactVersionMessage,
-  resolveManagedEnvironmentPlan,
-} from "./managed-resolver.ts";
-import { prepareAppleProjectState } from "./project-state.ts";
-import {
-  provisionManagedObjects,
-  resolveProcessEnvironmentPlan,
-} from "./process-resolver.ts";
+import { resolveProcessEnvironmentPlan } from "./process-resolver.ts";
 import { EnvironmentStore, parseEnvironmentStoreSize } from "./store.ts";
 import type { EnvironmentPlan, RequestedEnvironment } from "./types.ts";
 
 export interface EnvironmentSessionControllerOptions {
   store: EnvironmentStore;
-  projectStateRoot: string;
   localResolver?: typeof resolveLocalEnvironments;
-  managedResolver?: typeof resolveManagedEnvironmentPlan;
   installer?: typeof installTrustedRuntime;
 }
 
@@ -61,38 +51,6 @@ export class SandboxEnvironmentSessionController {
     });
   }
 
-  async resolveApple(
-    requested: RequestedEnvironment[],
-    context: EnvironmentResolutionContext,
-  ): Promise<EnvironmentPlan | undefined> {
-    if (requested.length === 0) return undefined;
-    const unpinned = requested.filter((request) => !request.requestedVersion);
-    if (unpinned.length > 0) {
-      throw new Error(
-        `Apple Container cannot reuse host-local runtimes; the selection must be pinned. ${managedExactVersionMessage(unpinned.map((request) => request.id))} Use the Process backend for host-local interpreters.`,
-      );
-    }
-    if (!this.options.managedResolver) {
-      await provisionManagedObjects(requested, {
-        store: this.options.store,
-        platform: "linux-arm64",
-        installMode: context.config.install.mode,
-        installer: this.options.installer,
-        installerOptions: context.installerOptions,
-        approveInstall: context.approveInstall,
-      });
-    }
-    const plan = await (this.options.managedResolver ?? resolveManagedEnvironmentPlan)(
-      requested,
-      { store: this.options.store, platform: "linux-arm64" },
-    );
-    await prepareAppleProjectState(plan, {
-      workspace: context.cwd,
-      root: this.options.projectStateRoot,
-    });
-    return plan;
-  }
-
   async activate(
     plan: EnvironmentPlan | undefined,
     sessionId: string,
@@ -101,7 +59,7 @@ export class SandboxEnvironmentSessionController {
     await this.releaseLease();
     this.activePlan = plan;
     const managedProfiles = plan?.profiles.filter((profile) => profile.source === "managed") ?? [];
-    if (managedProfiles.length > 0 && !this.options.managedResolver) {
+    if (managedProfiles.length > 0) {
       this.leaseId = `${sessionId}:${process.pid}`;
       for (const profile of managedProfiles) {
         await this.options.store.acquireLease(

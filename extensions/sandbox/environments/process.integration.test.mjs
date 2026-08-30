@@ -22,13 +22,11 @@ integrationTest("selected local environments execute together in the Process san
     env: process.env,
   });
   const plan = composeEnvironmentPlan({
-    backend: "process",
     platform: `${process.platform}-${process.arch}`,
     basePath: (process.env.PATH ?? "").split(":").filter(Boolean),
   }, profiles);
   const {
     enabled: _enabled,
-    isolation: _isolation,
     hostExec: _hostExec,
     developmentEnvironments: _developmentEnvironments,
     kubernetes: _kubernetes,

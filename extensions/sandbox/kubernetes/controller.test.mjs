@@ -14,7 +14,7 @@ const config = {
   credentialMode: "host-broker",
 };
 
-test("Apple Kubernetes controller uses host kubectl and mounts only sanitized guest config", async () => {
+test("Kubernetes controller uses host kubectl and injects a sanitized KUBECONFIG", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-kube-controller-"));
   const bin = join(root, "bin");
   const configDirectory = join(root, "sanitized");
@@ -24,19 +24,17 @@ test("Apple Kubernetes controller uses host kubectl and mounts only sanitized gu
   await writeFile(join(bin, "kubectl"), "#!/bin/sh\n", { mode: 0o755 });
   await writeFile(kubeconfigPath, "{}");
   const plan = {
-    backend: "apple-container",
-    platform: "linux-arm64",
+    platform: "darwin-arm64",
     profiles: [{
       id: "kubectl",
       version: "1.32.3",
-      source: "managed",
-      binDirectories: ["/opt/pi-toolchains/kubectl/1.32.3/bin"],
+      source: "local",
+      binDirectories: [bin],
       env: {},
-      allowRead: ["/opt/pi-toolchains/kubectl/1.32.3"],
+      allowRead: [root],
     }],
-    env: { PATH: "/opt/pi-toolchains/kubectl/1.32.3/bin:/usr/bin:/bin" },
+    env: { PATH: `${bin}:/usr/bin:/bin` },
     allowRead: [],
-    mounts: [],
   };
   const grants = [];
   const access = {
@@ -55,18 +53,8 @@ test("Apple Kubernetes controller uses host kubectl and mounts only sanitized gu
     async stop() {},
   };
   const controller = new SandboxKubernetesController({
-    state: () => ({ active: true, effectiveBackend: "apple-container", config }),
+    state: () => ({ active: true, config }),
     environmentPlan: () => plan,
-    async environmentResolver() {
-      return [{
-        id: "kubectl",
-        version: "1.32.3",
-        source: "local",
-        binDirectories: [bin],
-        env: {},
-        allowRead: [root],
-      }];
-    },
     async contextDiscovery({ kubectl }) {
       assert.equal(kubectl, join(bin, "kubectl"));
       return {
@@ -97,15 +85,8 @@ test("Apple Kubernetes controller uses host kubectl and mounts only sanitized gu
 
   await controller.grant("dev", ctx);
   assert.equal(grants[0].kubectl, join(bin, "kubectl"));
-  assert.equal(plan.env.KUBECONFIG, "/opt/pi-kube/config.json");
-  assert.deepEqual(plan.mounts.at(-1), {
-    source: configDirectory,
-    target: "/opt/pi-kube",
-    readonly: true,
-  });
-  assert.ok(plan.allowRead.includes("/opt/pi-kube/config.json"));
+  assert.equal(plan.env.KUBECONFIG, kubeconfigPath);
 
   await controller.revokeAll();
   assert.equal(plan.env.KUBECONFIG, undefined);
-  assert.equal(plan.mounts.some((mount) => mount.target === "/opt/pi-kube"), false);
 });

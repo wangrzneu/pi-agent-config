@@ -1,24 +1,12 @@
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
-import { composeEnvironmentPlan } from "./composer.ts";
 import { EnvironmentStore } from "./store.ts";
 import type {
   EnvironmentId,
-  EnvironmentMount,
-  EnvironmentPlan,
   RequestedEnvironment,
   ResolvedEnvironment,
 } from "./types.ts";
-
-const APPLE_BASE_PATH = [
-  "/usr/local/sbin",
-  "/usr/local/bin",
-  "/usr/sbin",
-  "/usr/bin",
-  "/sbin",
-  "/bin",
-];
 
 export interface ManagedEnvironmentResolutionContext {
   store: EnvironmentStore;
@@ -45,30 +33,6 @@ export async function resolveStoredEnvironments(
     profiles.push(managedProfile(selection.id, version, objectPath));
   }
   return profiles;
-}
-
-export async function resolveManagedEnvironmentPlan(
-  requested: RequestedEnvironment[],
-  context: ManagedEnvironmentResolutionContext,
-): Promise<EnvironmentPlan> {
-  await context.store.initialize();
-  const profiles: ResolvedEnvironment[] = [];
-  const mounts: EnvironmentMount[] = [];
-
-  for (const selection of requested) {
-    const { version, objectPath } = await resolveStoredObject(selection, context);
-    const target = `/opt/pi-toolchains/${selection.id}/${version}`;
-    profiles.push(managedProfile(selection.id, version, target));
-    mounts.push({ source: objectPath, target, readonly: true });
-  }
-
-  const plan = composeEnvironmentPlan({
-    backend: "apple-container",
-    platform: context.platform,
-    shimDirectory: "/opt/pi-shims",
-    basePath: APPLE_BASE_PATH,
-  }, profiles);
-  return { ...plan, mounts };
 }
 
 async function resolveStoredObject(
@@ -128,4 +92,3 @@ function profileExecutable(id: EnvironmentId): string {
     case "kubectl": return "kubectl";
   }
 }
-

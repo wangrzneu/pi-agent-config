@@ -3,10 +3,8 @@ import test from "node:test";
 import { composeEnvironmentPlan } from "./composer.ts";
 
 const base = {
-  backend: "apple-container",
-  platform: "linux-arm64",
-  basePath: ["/usr/bin", "/bin"],
-  shimDirectory: "/opt/pi-shims",
+  platform: "darwin-arm64",
+  basePath: ["/opt/homebrew/bin", "/usr/bin", "/bin"],
 };
 
 test("environment plans compose PATH, variables, and read roots deterministically", () => {
@@ -14,32 +12,32 @@ test("environment plans compose PATH, variables, and read roots deterministicall
     {
       id: "go",
       version: "1.24.2",
-      source: "managed",
-      binDirectories: ["/opt/pi-toolchains/go/1.24.2/bin"],
-      env: { GOROOT: "/opt/pi-toolchains/go/1.24.2", GOENV: "off" },
-      allowRead: ["/opt/pi-toolchains/go/1.24.2"],
+      source: "local",
+      binDirectories: ["/usr/local/go/bin"],
+      env: { GOROOT: "/usr/local/go", GOENV: "off" },
+      allowRead: ["/usr/local/go"],
     },
     {
       id: "python",
       version: "3.13.2",
-      source: "managed",
-      binDirectories: ["/var/pi-env/python/bin", "/opt/pi-toolchains/python/3.13.2/bin"],
-      env: { VIRTUAL_ENV: "/var/pi-env/python", PYTHONPATH: undefined },
-      allowRead: ["/opt/pi-toolchains/python/3.13.2"],
+      source: "local",
+      binDirectories: ["/Users/me/project/.venv/bin"],
+      env: { VIRTUAL_ENV: "/Users/me/project/.venv", PYTHONPATH: undefined },
+      allowRead: ["/Users/me/project/.venv"],
     },
   ]);
 
   assert.equal(
     plan.env.PATH,
-    "/opt/pi-shims:/opt/pi-toolchains/go/1.24.2/bin:/var/pi-env/python/bin:/opt/pi-toolchains/python/3.13.2/bin:/usr/bin:/bin",
+    "/usr/local/go/bin:/Users/me/project/.venv/bin:/opt/homebrew/bin:/usr/bin:/bin",
   );
-  assert.equal(plan.env.GOROOT, "/opt/pi-toolchains/go/1.24.2");
+  assert.equal(plan.env.GOROOT, "/usr/local/go");
   assert.equal(plan.env.GOENV, "off");
-  assert.equal(plan.env.VIRTUAL_ENV, "/var/pi-env/python");
+  assert.equal(plan.env.VIRTUAL_ENV, "/Users/me/project/.venv");
   assert.equal(plan.env.PYTHONPATH, undefined);
   assert.deepEqual(plan.allowRead, [
-    "/opt/pi-toolchains/go/1.24.2",
-    "/opt/pi-toolchains/python/3.13.2",
+    "/usr/local/go",
+    "/Users/me/project/.venv",
   ]);
 });
 
@@ -47,13 +45,13 @@ test("duplicate paths are removed without changing first-use order", () => {
   const plan = composeEnvironmentPlan(base, [{
     id: "node",
     version: "22.14.0",
-    source: "managed",
-    binDirectories: ["/opt/node/bin", "/usr/bin", "/opt/node/bin"],
+    source: "local",
+    binDirectories: ["/opt/homebrew/opt/node/bin", "/usr/bin", "/opt/homebrew/opt/node/bin"],
     env: {},
-    allowRead: ["/opt/node", "/opt/node"],
+    allowRead: ["/opt/homebrew/opt/node", "/opt/homebrew/opt/node"],
   }]);
-  assert.equal(plan.env.PATH, "/opt/pi-shims:/opt/node/bin:/usr/bin:/bin");
-  assert.deepEqual(plan.allowRead, ["/opt/node"]);
+  assert.equal(plan.env.PATH, "/opt/homebrew/opt/node/bin:/usr/bin:/opt/homebrew/bin:/bin");
+  assert.deepEqual(plan.allowRead, ["/opt/homebrew/opt/node"]);
 });
 
 test("profile variable conflicts and direct PATH overrides fail closed", () => {

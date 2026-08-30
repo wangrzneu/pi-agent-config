@@ -1,27 +1,21 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { LoadedSandboxConfig, SandboxBackendMode } from "./config.ts";
+import type { LoadedSandboxConfig } from "./config.ts";
 import type { EnvironmentStoreStatus } from "./environments/store.ts";
 import type { EnvironmentPlan, RequestedEnvironment } from "./environments/types.ts";
 
 export const STATUS_KEY = "sandbox";
-
-export type EffectiveSandboxBackend = Exclude<SandboxBackendMode, "auto">;
 
 export type SandboxState =
   | {
       mode: "starting" | "bypass" | "blocked";
       reason: string;
       loaded?: LoadedSandboxConfig;
-      requestedBackend?: SandboxBackendMode;
-      effectiveBackend?: never;
       environmentPlan?: EnvironmentPlan;
     }
   | {
       mode: "sandboxed";
       reason: string;
       loaded: LoadedSandboxConfig;
-      requestedBackend: SandboxBackendMode;
-      effectiveBackend: EffectiveSandboxBackend;
       environmentPlan?: EnvironmentPlan;
     };
 
@@ -83,18 +77,12 @@ export function formatState(
   if (!loaded) return lines.join("\n");
 
   const config = loaded.config;
-  const usesAppleContainer = state.effectiveBackend === "apple-container";
   lines.push(
     `Configuration: ${loaded.loadedFrom.join(", ") || "built-in defaults"}`,
-    `Requested backend: ${state.requestedBackend ?? "not resolved"}`,
-    `Effective backend: ${state.effectiveBackend ?? "not active"}`,
     "",
     "Isolation:",
-    `  Host launcher: ${usesAppleContainer ? "trusted fixed argv (Apple XPC is incompatible with Seatbelt)" : "ASRT (Seatbelt/bubblewrap)"}`,
-    `  Apple Container VM: ${usesAppleContainer ? "enabled" : "disabled"}`,
-    `  Guest process: ${usesAppleContainer ? "ASRT (bubblewrap + proxy; VM isolates host IPC)" : "not applicable"}`,
-    `  Workspace: ${usesAppleContainer ? config.isolation.appleContainer.workspaceMode : "direct"}`,
-    `  Policy parity: ${usesAppleContainer ? "strict (transactional workspace)" : "process backend"}`,
+    "  Backend: Process sandbox (ASRT Seatbelt/bubblewrap)",
+    "  Workspace: direct",
     "",
     "Development environments:",
     ...(state.environmentPlan?.profiles.length

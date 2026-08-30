@@ -2,7 +2,7 @@
 
 The sandbox extension replaces Pi's built-in `bash` execution backend and intercepts user `!` commands. It uses `@anthropic-ai/sandbox-runtime` to enforce filesystem and network policy with macOS Seatbelt (`sandbox-exec`) or Linux bubblewrap.
 
-For the architecture and the reasoning behind each behavior, see [`sandbox-design.md`](sandbox-design.md). For the experimental macOS 26 Apple Container VM layer around the Process sandbox, see [`sandbox-apple-container.md`](sandbox-apple-container.md). The composable Go/Python/Node.js/pnpm/kubectl environments and Kubernetes credential broker are specified in [`sandbox-development-environments.md`](sandbox-development-environments.md). For a feasibility analysis of replacing the OS-denied `~` access with a FUSE interception gate (authorize-then-allow), see [`sandbox-fuse-gate.md`](sandbox-fuse-gate.md).
+For the architecture and the reasoning behind each behavior, see [`sandbox-design.md`](sandbox-design.md). The composable Go/Python/Node.js/pnpm/kubectl environments and Kubernetes credential broker are specified in [`sandbox-development-environments.md`](sandbox-development-environments.md). For a feasibility analysis of replacing the OS-denied `~` access with a FUSE interception gate (authorize-then-allow), see [`sandbox-fuse-gate.md`](sandbox-fuse-gate.md).
 
 ## Design goals
 
@@ -20,20 +20,18 @@ The defaults are intended for everyday, iterative coding:
 - Foreground builds, tests, and migrations have no implicit timeout. Output streams continuously through Pi's bounded bash output handling, and an explicit `timeout` remains available.
 - Cancellation sends `TERM` to the entire command process group and escalates to `KILL`; session shutdown also stops tracked foreground commands before resetting the runtime.
 
-The extension fails closed. If the Process sandbox cannot initialize, `bash` and `!` are blocked instead of silently running on the host. The default backend mode is `auto`: it selects Apple Container only when its startup checks pass, otherwise warns and falls back to the Process sandbox. Forced `apple-container` mode blocks if those checks fail. `--no-sandbox` is the explicit emergency bypass.
-
-Choose a backend for one invocation with `pi --sandbox-mode auto|process|apple-container`. The flag overrides configuration; `/sandbox` shows both the requested and effective backends. See [`sandbox-apple-container.md`](sandbox-apple-container.md) for the check list and persistent configuration.
+The extension fails closed. If the Process sandbox cannot initialize, `bash` and `!` are blocked instead of silently running on the host. `--no-sandbox` is the explicit emergency bypass.
 
 ### Experimental development environment profiles
 
 Interactive TUI startup shows a multi-selector when `developmentEnvironments.promptOnStart` is enabled (the default). A comma-separated CLI selection skips that dialog:
 
 ```bash
-pi --sandbox-mode process --sandbox-env go,python,node,pnpm,kubectl
-pi --sandbox-mode apple-container --sandbox-env go@1.26.6,python@3.13.9,node@26.5.0,pnpm@10.33.0,kubectl@1.32.3
+pi --sandbox-env go,python,node,pnpm,kubectl
+pi --sandbox-env go@1.26.6,python@3.13.9,node@26.5.0,pnpm@10.33.0,kubectl@1.32.3
 ```
 
-Process mode resolves already active/local tools without sourcing a login shell and adds only their canonical runtime roots to shell read access. Apple Container mode resolves exact Linux/arm64 objects already present in Pi's content-addressed environment store and mounts each object read-only. pnpm implicitly selects Node.js. `/sandbox` reports the effective profiles, versions, sources, and platform.
+The Process sandbox resolves already active/local tools without sourcing a login shell and adds only their canonical runtime roots to shell read access. Missing exact versions can be installed into the content-addressed environment store. pnpm implicitly selects Node.js. `/sandbox` reports the effective profiles, versions, sources, and platform.
 
 Process mode also supports session-scoped Kubernetes context grants after selecting the kubectl profile:
 
@@ -46,9 +44,9 @@ Process mode also supports session-scoped Kubernetes context grants after select
 /sandbox kube forget             # clear persisted context names (not credentials)
 ```
 
-The trusted host reads redacted context metadata and runs `kubectl proxy`; the sandbox receives only a TLS capability gateway and sanitized `KUBECONFIG`. Exec credential helpers require a separate confirmation. Access defaults to `observe` and the context's namespace. Real kubeconfig tokens, private keys, and helper output never enter the sandbox. Process uses loopback. Apple Container binds only the private Apple bridge interface, mounts the sanitized config read-only, and never opens a public listener.
+The trusted host reads redacted context metadata and runs `kubectl proxy`; the sandbox receives only a TLS capability gateway and sanitized `KUBECONFIG` on loopback. Exec credential helpers require a separate confirmation. Access defaults to `observe` and the context's namespace. Real kubeconfig tokens, private keys, and helper output never enter the sandbox.
 
-With an exact version, Apple Container can install missing Go, Python, Node.js, pnpm, and kubectl Linux/arm64 runtimes from hard-coded trusted catalogs. `install.mode` controls `ask|auto|never`. Downloads require HTTPS, verify official SHA-256 or npm SHA-512 integrity, use bounded traversal-safe extraction in a no-network sandboxed subprocess, and publish immutable content-addressed objects. Session leases protect active objects while configured quota and retention drive automatic LRU pruning. Pinned checksum-verified relocatable Python is supported. Apple projects get a persistent trusted-bootstrap venv and isolated pnpm store; `/sandbox env status|list|prune` manages the shared runtime store. See [`sandbox-development-environments.md`](sandbox-development-environments.md) for the complete target behavior.
+With an exact version, missing Go, Python, Node.js, pnpm, and kubectl runtimes can be installed from hard-coded trusted catalogs. `install.mode` controls `ask|auto|never`. Downloads require HTTPS, verify official SHA-256 or npm SHA-512 integrity, use bounded traversal-safe extraction in a no-network sandboxed subprocess, and publish immutable content-addressed objects. Session leases protect active objects while configured quota and retention drive automatic LRU pruning. Pinned checksum-verified relocatable Python is supported. `/sandbox env status|list|prune` manages the shared runtime store. See [`sandbox-development-environments.md`](sandbox-development-environments.md) for the complete target behavior.
 
 ## External path authorization
 
@@ -206,7 +204,7 @@ Go 1.23+ prints a single `telemetry upload taken` warning on stderr when the tel
 
 Set `credentials.envVars` to `[]` only when a command intentionally needs inherited credentials. Prefer a narrowly allowed domain and the runtime's credential masking/injection configuration over exposing a token generally.
 
-Set top-level `"enabled": false` in a trusted configuration, or start Pi with `--no-sandbox`, to use normal local bash explicitly. To retain sandboxing but skip VM isolation, use `pi --sandbox-mode process`.
+Set top-level `"enabled": false` in a trusted configuration, or start Pi with `--no-sandbox`, to use normal local bash explicitly.
 
 ## Long-running commands
 

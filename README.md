@@ -63,7 +63,6 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | `docs/external-memory-test-plan.md` | Verification plan for external memory |
 | `docs/sandbox.md` | Sandbox behavior, configuration, and security boundaries |
 | `docs/sandbox-design.md` | Architecture and design decisions for the sandbox extension |
-| `docs/sandbox-apple-container.md` | Experimental Apple Container VM + Process sandbox isolation layer |
 | `docs/sandbox-development-environments.md` | Planned composable language/tool environments, dynamic runtime store, and Kubernetes credential broker |
 | `docs/ssh-tools.md` | SSH tool requirements, behavior, and security boundaries |
 | `docs/security.md` | Security model overview |
@@ -174,9 +173,7 @@ per-user OS temporary directory for toolchains (git, compilers).
   `strictAllowlist` still hard-block access.
 - ⏱️ Foreground commands have no implicit timeout and support streamed output plus process-group
   cancellation for long builds and tests.
-- 🍎 Backend mode defaults to `auto`: Apple Container is selected when its prerequisites pass; otherwise
-  Pi warns and uses the Process sandbox. Override with `--sandbox-mode auto|process|apple-container`.
-- ⌨️ Use `/sandbox` to inspect the requested/effective backend and policy, `/sandbox reload` after
+- ⌨️ Use `/sandbox` to inspect the Process sandbox policy, `/sandbox reload` after
   configuration changes, or `--no-sandbox` for an explicit unsandboxed bypass.
 
 ### 💬 Side questions with `/btw`

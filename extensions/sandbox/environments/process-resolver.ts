@@ -84,7 +84,6 @@ export async function resolveProcessEnvironmentPlan(
     return profile;
   });
   return composeEnvironmentPlan({
-    backend: "process",
     platform: options.platform,
     basePath: (options.env.PATH ?? "").split(delimiter).filter(Boolean),
   }, profiles);

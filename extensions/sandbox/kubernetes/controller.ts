@@ -2,11 +2,9 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { KubernetesConfig } from "../config.ts";
-import { resolveLocalEnvironments } from "../environments/local-resolver.ts";
 import type { EnvironmentPlan } from "../environments/types.ts";
 import { SANDBOX_TEMP_ROOT } from "../sandbox-paths.ts";
 import { errorMessage } from "../util.ts";
-import { resolveAppleContainerHostGateway } from "./apple-bridge.ts";
 import { KubernetesCapabilityGateway } from "./capability-gateway.ts";
 import { KubernetesContextSelectionStore } from "./context-selection-store.ts";
 import {
@@ -20,24 +18,16 @@ import {
 } from "./session-access.ts";
 import { createKubernetesGatewayTlsMaterial } from "./tls-material.ts";
 
-const APPLE_KUBERNETES_DIRECTORY = "/opt/pi-kube";
-const APPLE_KUBECONFIG_PATH = `${APPLE_KUBERNETES_DIRECTORY}/config.json`;
-
-type EffectiveBackend = "process" | "apple-container";
-
 export interface KubernetesControllerState {
   active: boolean;
-  effectiveBackend?: EffectiveBackend;
   config?: KubernetesConfig;
 }
 
 export interface KubernetesControllerOptions {
   state: () => KubernetesControllerState;
   environmentPlan: () => EnvironmentPlan | undefined;
-  environmentResolver?: typeof resolveLocalEnvironments;
   contextDiscovery?: typeof discoverKubernetesContexts;
   accessFactory?: () => Promise<KubernetesSessionAccess>;
-  appleContainerBinary?: () => string | undefined;
   selectionStore: KubernetesContextSelectionStore;
 }
 
@@ -92,7 +82,7 @@ export class SandboxKubernetesController {
 
   async grant(requestedContextName: string | undefined, ctx: ExtensionContext): Promise<boolean> {
     const state = this.requireActiveState();
-    const kubectl = await this.hostKubectlExecutable(ctx, state.effectiveBackend);
+    const kubectl = this.hostKubectlExecutable();
     const discovered = await (this.options.contextDiscovery ?? discoverKubernetesContexts)({
       kubectl,
       env: process.env,
@@ -111,7 +101,7 @@ export class SandboxKubernetesController {
     if (!metadata) throw new Error(`Unknown local Kubernetes context: ${contextName}`);
     await this.approveExecHelper(contextName, metadata, ctx);
 
-    const access = await this.ensureAccess(state.effectiveBackend);
+    const access = await this.ensureAccess();
     const config = state.config;
     await access.grant({
       metadata,
@@ -122,7 +112,7 @@ export class SandboxKubernetesController {
         ? undefined
         : [metadata.namespace ?? "default"],
     });
-    this.applyEnvironment(access.kubeconfigPath, state.effectiveBackend);
+    this.applyEnvironment(access.kubeconfigPath);
     if (config.persistContextSelection) {
       this.rememberedContexts.add(contextName);
       try {
@@ -159,46 +149,30 @@ export class SandboxKubernetesController {
     this.clearEnvironment();
   }
 
-  private requireActiveState(): { effectiveBackend: EffectiveBackend; config: KubernetesConfig } {
+  private requireActiveState(): { config: KubernetesConfig } {
     const state = this.options.state();
-    if (!state.active || !state.effectiveBackend || !state.config) {
+    if (!state.active || !state.config) {
       throw new Error("Kubernetes access requires an active sandbox");
     }
-    return { effectiveBackend: state.effectiveBackend, config: state.config };
+    return { config: state.config };
   }
 
-  private async hostKubectlExecutable(
-    ctx: ExtensionContext,
-    backend: EffectiveBackend,
-  ): Promise<string> {
+  private hostKubectlExecutable(): string {
     if (!hasProfile(this.options.environmentPlan(), "kubectl")) {
       throw new Error("Select the kubectl development environment before granting Kubernetes contexts");
     }
-    if (backend === "process") {
-      const executable = profileExecutable(this.options.environmentPlan(), "kubectl");
-      if (!executable) throw new Error("Selected kubectl executable is unavailable on the host");
-      return executable;
-    }
-    const resolver = this.options.environmentResolver ?? resolveLocalEnvironments;
-    const [hostProfile] = await resolver([{ id: "kubectl" }], { cwd: ctx.cwd, env: process.env });
-    const executable = hostProfile?.binDirectories[0]
-      ? join(hostProfile.binDirectories[0], "kubectl")
-      : undefined;
-    if (!executable || !existsSync(executable)) {
-      throw new Error("Apple Container Kubernetes access requires a trusted host kubectl for the credential broker");
-    }
+    const executable = profileExecutable(this.options.environmentPlan(), "kubectl");
+    if (!executable) throw new Error("Selected kubectl executable is unavailable on the host");
     return executable;
   }
 
-  private async ensureAccess(backend: EffectiveBackend): Promise<KubernetesSessionAccess> {
+  private async ensureAccess(): Promise<KubernetesSessionAccess> {
     if (this.access) return this.access;
     if (this.options.accessFactory) {
       this.access = await this.options.accessFactory();
       return this.access;
     }
-    const gatewayHost = backend === "apple-container"
-      ? await resolveAppleContainerHostGateway({ containerBinary: this.options.appleContainerBinary?.() })
-      : "127.0.0.1";
+    const gatewayHost = "127.0.0.1";
     const tls = await createKubernetesGatewayTlsMaterial(
       join(SANDBOX_TEMP_ROOT, "kubernetes", "tls"),
       [gatewayHost],
@@ -240,27 +214,16 @@ export class SandboxKubernetesController {
     this.approvedExecInvocations.add(approvalKey);
   }
 
-  private applyEnvironment(kubeconfigPath: string, backend: EffectiveBackend): void {
+  private applyEnvironment(kubeconfigPath: string): void {
     const plan = this.options.environmentPlan();
     if (!plan) return;
-    if (backend === "apple-container") {
-      plan.env.KUBECONFIG = APPLE_KUBECONFIG_PATH;
-      plan.mounts = [
-        ...(plan.mounts ?? []).filter((mount) => mount.target !== APPLE_KUBERNETES_DIRECTORY),
-        { source: join(kubeconfigPath, ".."), target: APPLE_KUBERNETES_DIRECTORY, readonly: true },
-      ];
-      if (!plan.allowRead.includes(APPLE_KUBECONFIG_PATH)) plan.allowRead.push(APPLE_KUBECONFIG_PATH);
-    } else {
-      plan.env.KUBECONFIG = kubeconfigPath;
-    }
+    plan.env.KUBECONFIG = kubeconfigPath;
   }
 
   private clearEnvironment(): void {
     const plan = this.options.environmentPlan();
     if (!plan) return;
     plan.env.KUBECONFIG = undefined;
-    plan.mounts = plan.mounts?.filter((mount) => mount.target !== APPLE_KUBERNETES_DIRECTORY);
-    plan.allowRead = plan.allowRead.filter((path) => path !== APPLE_KUBECONFIG_PATH);
   }
 }
 

@@ -144,6 +144,38 @@ test("hostExec overrides replace the command list wholesale", () => {
   assert.deepEqual(config.hostExec?.commands, ["az"]);
 });
 
+test("legacy isolation.mode process is ignored with a warning", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-sandbox-isolation-"));
+  const agentDir = join(root, "agent");
+  const cwd = join(root, "project");
+  await mkdir(join(agentDir, "extensions"), { recursive: true });
+  await writeFile(
+    join(agentDir, "extensions", "sandbox.json"),
+    JSON.stringify({ isolation: { mode: "process" } }),
+  );
+
+  const loaded = loadSandboxConfig(cwd, agentDir, ".pi", true);
+
+  assert.equal("isolation" in loaded.config, false);
+  assert.match(loaded.warnings[0], /Ignored isolation configuration/);
+});
+
+test("forced Apple Container isolation fails closed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-sandbox-apple-isolation-"));
+  const agentDir = join(root, "agent");
+  const cwd = join(root, "project");
+  await mkdir(join(agentDir, "extensions"), { recursive: true });
+  await writeFile(
+    join(agentDir, "extensions", "sandbox.json"),
+    JSON.stringify({ isolation: { mode: "apple-container" } }),
+  );
+
+  assert.throws(
+    () => loadSandboxConfig(cwd, agentDir, ".pi", true),
+    /Apple Container was removed/,
+  );
+});
+
 test("untrusted project config is ignored and reported", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-sandbox-untrusted-"));
   const agentDir = join(root, "agent");

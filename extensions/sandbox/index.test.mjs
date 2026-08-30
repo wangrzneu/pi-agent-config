@@ -8,14 +8,12 @@ import test from "node:test";
 import {
   defaultPiReadRoots,
   registerSandboxExtension,
-  resolveAppleContainerHostGateway,
-  resolveSandboxBackendMode,
 } from "./index.ts";
 import { EnvironmentStore } from "./environments/store.ts";
 import { KubernetesContextSelectionStore } from "./kubernetes/context-selection-store.ts";
 
 function createHarness(runtime, flags = {}, authorizationOptions) {
-  const effectiveFlags = { "sandbox-mode": "process", ...flags };
+  const effectiveFlags = { ...flags };
   const handlers = new Map();
   const commands = new Map();
   let bashTool;
@@ -85,7 +83,6 @@ function createHarness(runtime, flags = {}, authorizationOptions) {
     runtime,
     {
       environmentStore: new EnvironmentStore(join(tmpdir(), `pi-index-test-store-${randomUUID()}`)),
-      projectStateRoot: join(tmpdir(), `pi-index-test-projects-${randomUUID()}`),
       kubernetesSelectionStore,
       ...(authorizationOptions ?? { allowOsTemp: false }),
     },
@@ -101,23 +98,6 @@ function createHarness(runtime, flags = {}, authorizationOptions) {
     notifications,
     confirmations,
     kubernetesSelectionStore,
-  };
-}
-
-function createAppleController({ preflightError } = {}) {
-  let preflights = 0;
-  return {
-    async preflight() {
-      preflights += 1;
-      if (preflightError) throw preflightError;
-    },
-    track() {},
-    release() {},
-    async forceDelete() {},
-    async stopAll() {},
-    preflightCount() {
-      return preflights;
-    },
   };
 }
 
@@ -156,98 +136,13 @@ function createRuntime({ initializeError } = {}) {
   };
 }
 
-test("Apple Container gateway prefers the authoritative container CLI, then the bridge heuristic", async () => {
-  const address = (value) => ({ address: value, family: "IPv4", internal: false, netmask: "255.255.255.0", cidr: `${value}/24`, mac: "00:00:00:00:00:00" });
-
-  assert.equal(await resolveAppleContainerHostGateway({
-    containerBinary: "/usr/bin/container",
-    run: async () => JSON.stringify([{ status: { ipv4Gateway: "192.168.64.1" } }]),
-  }), "192.168.64.1");
-
-  assert.equal(await resolveAppleContainerHostGateway({
-    interfaces: {
-      bridge0: [address("192.168.1.1")],
-      bridge100: [address("192.168.65.1")],
-    },
-  }), "192.168.65.1");
-  await assert.rejects(
-    resolveAppleContainerHostGateway({ interfaces: {} }),
-    /unique private Apple Container host gateway/,
-  );
-});
-
-test("sandbox backend mode resolves CLI overrides", () => {
-  assert.equal(resolveSandboxBackendMode(undefined, "auto"), "auto");
-  assert.equal(resolveSandboxBackendMode(undefined, "process"), "process");
-  assert.equal(resolveSandboxBackendMode("process", "auto"), "process");
-  assert.equal(resolveSandboxBackendMode("apple-container", "process"), "apple-container");
-  assert.throws(() => resolveSandboxBackendMode("vm", "auto"), /Invalid --sandbox-mode/);
-  assert.throws(() => resolveSandboxBackendMode(undefined, "vm"), /Invalid isolation\.mode/);
-});
-
-test("auto mode selects Apple Container when prerequisites pass", async () => {
+test("unpinned local environments resolve through the Process sandbox", async () => {
   const fake = createRuntime();
-  const controller = createAppleController();
   const harness = createHarness(
     fake.runtime,
-    { "sandbox-mode": "auto" },
-    { allowOsTemp: false, appleContainerController: controller },
-  );
-  await harness.handlers.get("session_start")({}, harness.ctx);
-
-  assert.equal(controller.preflightCount(), 1);
-  assert.ok(harness.notifications.some(({ message }) => /Apple Container \+ Process sandbox initialized/.test(message)));
-  await harness.commands.get("sandbox")("", harness.ctx);
-  assert.match(harness.notifications.at(-1).message, /Requested backend: auto/);
-  assert.match(harness.notifications.at(-1).message, /Effective backend: apple-container/);
-});
-
-test("auto mode reports missing prerequisites and falls back to Process sandbox", async () => {
-  const fake = createRuntime();
-  const controller = createAppleController({
-    preflightError: new Error("container system status timed out after 12000ms"),
-  });
-  const harness = createHarness(
-    fake.runtime,
-    { "sandbox-mode": "auto" },
-    { allowOsTemp: false, appleContainerController: controller },
-  );
-  await harness.handlers.get("session_start")({}, harness.ctx);
-
-  assert.match(harness.statuses.get("sandbox"), /sandbox on/);
-  assert.ok(harness.notifications.some(({ message, level }) => (
-    level === "warning"
-      && /timed out after 12000ms/.test(message)
-      && /Falling back to the Process sandbox/.test(message)
-  )));
-  await harness.commands.get("sandbox")("", harness.ctx);
-  assert.match(harness.notifications.at(-1).message, /Effective backend: process/);
-});
-
-test("forced Apple Container mode fails closed when prerequisites are missing", async () => {
-  const fake = createRuntime();
-  const controller = createAppleController({ preflightError: new Error("guest image is missing") });
-  const harness = createHarness(
-    fake.runtime,
-    { "sandbox-mode": "apple-container" },
-    { allowOsTemp: false, appleContainerController: controller },
-  );
-  await harness.handlers.get("session_start")({}, harness.ctx);
-
-  assert.match(harness.statuses.get("sandbox"), /sandbox blocked/);
-  assert.equal(fake.resetCount(), 1);
-  assert.ok(harness.notifications.some(({ message }) => /guest image is missing/.test(message)));
-});
-
-test("auto mode resolves unpinned environments locally without an Apple fallback warning", async () => {
-  const fake = createRuntime();
-  const controller = createAppleController();
-  const harness = createHarness(
-    fake.runtime,
-    { "sandbox-mode": "auto", "sandbox-env": "go" },
+    { "sandbox-env": "go" },
     {
       allowOsTemp: false,
-      appleContainerController: controller,
       async environmentResolver(requested) {
         return requested.map(({ id }) => ({
           id,
@@ -262,36 +157,10 @@ test("auto mode resolves unpinned environments locally without an Apple fallback
   );
   await harness.handlers.get("session_start")({}, harness.ctx);
 
-  assert.equal(controller.preflightCount(), 0, "Apple must not be attempted for unpinned runtimes");
-  assert.ok(!harness.notifications.some(({ message }) => /managed Apple environment unavailable/.test(message)));
-  assert.ok(harness.notifications.some(({ message, level }) => (
-    level === "info"
-      && /Using the Process sandbox instead of Apple Container because go has no pinned version/.test(message)
-      && /--sandbox-env go@<version>/.test(message)
-  )));
   assert.match(harness.statuses.get("sandbox"), /sandbox on/);
+  assert.ok(harness.notifications.some(({ message }) => /Process sandbox initialized/.test(message)));
   await harness.commands.get("sandbox")("", harness.ctx);
-  assert.match(harness.notifications.at(-1).message, /Effective backend: process/);
   assert.match(harness.notifications.at(-1).message, /go: 1\.24\.2 \(local/);
-});
-
-test("forced Apple Container mode fails closed with a clear message for unpinned runtimes", async () => {
-  const fake = createRuntime();
-  const harness = createHarness(
-    fake.runtime,
-    { "sandbox-mode": "apple-container", "sandbox-env": "go,python" },
-    { allowOsTemp: false, appleContainerController: createAppleController() },
-  );
-  await harness.handlers.get("session_start")({}, harness.ctx);
-
-  assert.match(harness.statuses.get("sandbox"), /sandbox blocked/);
-  assert.ok(harness.notifications.some(({ message }) => (
-    /require an exact version: go, python/.test(message)
-      && /--sandbox-env go@<version>/.test(message)
-  )));
-  const error = harness.notifications.find(({ level }) => level === "error");
-  assert.ok(error, "expected an error notification");
-  assert.doesNotMatch(error.message, /\.\./);
 });
 
 test("unlisted network domains request approval once per session", async () => {
@@ -422,18 +291,19 @@ test("TUI startup selector supplies the environment request when no CLI flag is 
   assert.match(harness.notifications.at(-1).message, /go: 1\.24\.2/);
 });
 
-test("forced Apple Container installs missing exact managed runtimes after approval", async () => {
+test("Process sandbox installs missing exact managed runtimes after approval", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-sandbox-managed-install-"));
   const store = new EnvironmentStore(root);
   let installs = 0;
   const fake = createRuntime();
   const harness = createHarness(fake.runtime, {
-    "sandbox-mode": "apple-container",
     "sandbox-env": "go@1.24.2",
   }, {
     allowOsTemp: false,
-    appleContainerController: createAppleController(),
     environmentStore: store,
+    async environmentResolver() {
+      throw new Error("no local go");
+    },
     async runtimeInstaller(targetStore, profile, version, platform) {
       installs += 1;
       const stagingPath = await targetStore.createStagingDirectory(profile);
@@ -451,64 +321,24 @@ test("forced Apple Container installs missing exact managed runtimes after appro
   await harness.handlers.get("session_start")({ reason: "startup" }, harness.ctx);
   assert.equal(installs, 1);
   await harness.commands.get("sandbox")("", harness.ctx);
-  assert.match(harness.notifications.at(-1).message, /backend: apple-container/);
-  assert.match(harness.notifications.at(-1).message, /go: 1\.24\.2/);
+  assert.match(harness.notifications.at(-1).message, /go: 1\.24\.2 \(managed/);
 });
 
-test("forced Apple Container accepts a managed guest environment plan", async () => {
+test("forced Apple Container isolation blocks sandbox initialization", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-sandbox-apple-removed-"));
+  await mkdir(join(root, ".pi"));
+  await writeFile(join(root, ".pi", "sandbox.json"), JSON.stringify({
+    isolation: { mode: "apple-container" },
+  }));
   const fake = createRuntime();
-  const controller = createAppleController();
-  const harness = createHarness(
-    fake.runtime,
-    { "sandbox-mode": "apple-container", "sandbox-env": "go@1.24.2" },
-    {
-      allowOsTemp: false,
-      appleContainerController: controller,
-      async managedEnvironmentResolver() {
-        return {
-          backend: "apple-container",
-          platform: "linux-arm64",
-          profiles: [{
-            id: "go",
-            version: "1.24.2",
-            source: "managed",
-            binDirectories: ["/opt/pi-toolchains/go/1.24.2/bin"],
-            env: { PATH: "/opt/pi-toolchains/go/1.24.2/bin:/usr/bin:/bin" },
-            allowRead: ["/opt/pi-toolchains/go/1.24.2"],
-          }],
-          env: { PATH: "/opt/pi-toolchains/go/1.24.2/bin:/usr/bin:/bin" },
-          allowRead: ["/opt/pi-toolchains/go/1.24.2"],
-          mounts: [{
-            source: "/host/go/1.24.2",
-            target: "/opt/pi-toolchains/go/1.24.2",
-            readonly: true,
-          }],
-        };
-      },
-    },
-  );
-  await harness.handlers.get("session_start")({}, harness.ctx);
-  assert.match(harness.statuses.get("sandbox"), /sandbox on/);
-  assert.equal(controller.preflightCount(), 1);
-  await harness.commands.get("sandbox")("", harness.ctx);
-  assert.match(harness.notifications.at(-1).message, /go: 1\.24\.2 \(managed, linux-arm64\)/);
-});
+  const harness = createHarness(fake.runtime);
+  harness.ctx.cwd = root;
+  await harness.handlers.get("session_start")({ reason: "startup" }, harness.ctx);
 
-test("forced Apple Container fails closed when a managed environment is missing", async () => {
-  const fake = createRuntime();
-  const harness = createHarness(
-    fake.runtime,
-    { "sandbox-mode": "apple-container", "sandbox-env": "go@1.24.2" },
-    {
-      allowOsTemp: false,
-      async managedEnvironmentResolver() {
-        throw new Error("go@1.24.2 for linux-arm64 is not installed");
-      },
-    },
-  );
-  await harness.handlers.get("session_start")({}, harness.ctx);
   assert.match(harness.statuses.get("sandbox"), /sandbox blocked/);
-  assert.ok(harness.notifications.some(({ message }) => /is not installed/.test(message)));
+  assert.ok(harness.notifications.some(({ message, level }) => (
+    level === "error" && /Apple Container was removed/.test(message)
+  )));
 });
 
 test("Kubernetes startup selection and /sandbox kube select inject a revocable sanitized config", async () => {
