@@ -145,6 +145,20 @@ export function registerSandboxExtension(
     accessFactory: authorizationOptions.kubernetesAccessFactory,
     selectionStore: kubernetesSelectionStore,
   });
+  const blockInitialization = (
+    ctx: ExtensionContext,
+    error: unknown,
+    loadedConfig?: LoadedSandboxConfig,
+  ): void => {
+    state = {
+      mode: "blocked",
+      reason: `initialization failed: ${errorMessage(error)}`,
+      loaded: loadedConfig,
+    };
+    setStatus(ctx, state);
+    const reason = state.reason.replace(/[.\s]+$/, "");
+    ctx.ui.notify(`Sandbox ${reason}. Bash is blocked; use --no-sandbox only for an explicit bypass.`, "error");
+  };
   const processOperations = createSandboxedBashOperations(runtime, tracker, () => {
     const filesystem = state.loaded?.config.filesystem;
     if (!filesystem) return undefined;
@@ -283,13 +297,7 @@ export function registerSandboxExtension(
         ctx.isProjectTrusted(),
       );
     } catch (error) {
-      state = {
-        mode: "blocked",
-        reason: `initialization failed: ${errorMessage(error)}`,
-      };
-      setStatus(ctx, state);
-      const reason = state.reason.replace(/[.\s]+$/, "");
-      ctx.ui.notify(`Sandbox ${reason}. Bash is blocked; use --no-sandbox only for an explicit bypass.`, "error");
+      blockInitialization(ctx, error);
       return;
     }
     for (const warning of loaded.warnings) ctx.ui.notify(warning, "warning");
@@ -402,14 +410,7 @@ export function registerSandboxExtension(
       await environmentController.reset();
       await runtime.reset().catch(() => undefined);
       initialized = false;
-      state = {
-        mode: "blocked",
-        reason: `initialization failed: ${errorMessage(error)}`,
-        loaded,
-      };
-      setStatus(ctx, state);
-      const reason = state.reason.replace(/[.\s]+$/, "");
-      ctx.ui.notify(`Sandbox ${reason}. Bash is blocked; use --no-sandbox only for an explicit bypass.`, "error");
+      blockInitialization(ctx, error, loaded);
     }
   });
 

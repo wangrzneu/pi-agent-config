@@ -33,7 +33,7 @@ pi --sandbox-env go@1.26.6,python@3.13.9,node@26.5.0,pnpm@10.33.0,kubectl@1.32.3
 
 The Process sandbox resolves already active/local tools without sourcing a login shell and adds only their canonical runtime roots to shell read access. Missing exact versions can be installed into the content-addressed environment store. pnpm implicitly selects Node.js. `/sandbox` reports the effective profiles, versions, sources, and platform.
 
-Process mode also supports session-scoped Kubernetes context grants after selecting the kubectl profile:
+The Process sandbox also supports session-scoped Kubernetes context grants after selecting the kubectl profile:
 
 ```text
 /sandbox kube select             # pick one local context

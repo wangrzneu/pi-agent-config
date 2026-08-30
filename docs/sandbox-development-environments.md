@@ -298,22 +298,33 @@ extensions/sandbox/
 ├── environments/
 │   ├── types.ts
 │   ├── selection.ts
-│   ├── resolver.ts
+│   ├── selector.ts
 │   ├── composer.ts
+│   ├── local-resolver.ts
+│   ├── managed-resolver.ts
+│   ├── process-resolver.ts
 │   ├── installer.ts
+│   ├── artifact-catalog.ts
+│   ├── archive-extractor.mjs
+│   ├── restricted-installer.ts
 │   ├── store.ts
-│   ├── garbage-collector.ts
-│   └── adapters/{go,python,node,pnpm,kubectl}.ts
+│   └── session-controller.ts
 ├── kubernetes/
-│   ├── kubeconfig-source.ts
-│   ├── context-selector.ts
-│   ├── credential-helper.ts
-│   ├── broker.ts
+│   ├── controller.ts
+│   ├── context-source.ts
+│   ├── context-selection-store.ts
+│   ├── session-access.ts
+│   ├── sanitized-kubeconfig.ts
+│   ├── proxy-broker.ts
 │   ├── capability-gateway.ts
-│   ├── access-policy.ts
-│   └── sanitized-kubeconfig.ts
+│   └── tls-material.ts
 ├── config.ts
 ├── process.ts
+├── path-gate.ts
+├── path-authorization.ts
+├── host-escape.ts
+├── git-identity.ts
+├── status.ts
 └── index.ts
 ```
 
