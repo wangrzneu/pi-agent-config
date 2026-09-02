@@ -1,4 +1,4 @@
-export const ENVIRONMENT_IDS = ["go", "python", "node", "pnpm", "kubectl"] as const;
+export const ENVIRONMENT_IDS = ["go", "python", "node", "pnpm", "kubectl", "aws"] as const;
 
 export type EnvironmentId = typeof ENVIRONMENT_IDS[number];
 export type EnvironmentSource = "local" | "managed";

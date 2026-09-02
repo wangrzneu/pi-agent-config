@@ -9,6 +9,7 @@ function createProbe() {
     ["node", "/tools/node/bin/node"],
     ["pnpm", "/tools/pnpm/bin/pnpm"],
     ["kubectl", "/tools/kubectl/bin/kubectl"],
+    ["aws", "/tools/awscli/bin/aws"],
   ]);
   const outputs = new Map([
     ["/tools/go/bin/go\0env\0-json\0GOROOT\0GOVERSION", JSON.stringify({ GOROOT: "/tools/go", GOVERSION: "go1.24.2" })],
@@ -16,6 +17,7 @@ function createProbe() {
     ["/tools/node/bin/node\0--version", "v22.14.0\n"],
     ["/tools/pnpm/bin/pnpm\0--version", "10.6.0\n"],
     ["/tools/kubectl/bin/kubectl\0version\0--client\0-o\0json", JSON.stringify({ clientVersion: { gitVersion: "v1.32.3" } })],
+    ["/tools/awscli/bin/aws\0--version", "aws-cli/2.31.32 Python/3.13.7 Darwin/25.5.0 source/arm64\n"],
   ]);
   return {
     async findExecutable(command) {
@@ -43,6 +45,7 @@ const requested = [
   { id: "node", requestedVersion: "22.14.0" },
   { id: "pnpm", requestedVersion: "10.6.0" },
   { id: "kubectl", requestedVersion: "1.32.3" },
+  { id: "aws", requestedVersion: "2.31.32" },
 ];
 
 test("local resolver produces composable profiles without sourcing a shell", async () => {
@@ -58,6 +61,7 @@ test("local resolver produces composable profiles without sourcing a shell", asy
     { id: "node", version: "22.14.0" },
     { id: "pnpm", version: "10.6.0" },
     { id: "kubectl", version: "1.32.3" },
+    { id: "aws", version: "2.31.32" },
   ]);
   assert.deepEqual(profiles[0].env, { GOROOT: "/tools/go", GOENV: "off" });
   assert.deepEqual(profiles[1].env, {
@@ -76,7 +80,18 @@ test("requested version mismatches fail closed", async () => {
       env: { PATH: "/tools/bin" },
       probe: createProbe(),
     }),
-    /requested 20\.0\.0, but the local runtime is 22\.14\.0/,
+    /requested 20\.0\.0, but the local runtime is 22\.14\.0; a matching managed runtime is required/,
+  );
+});
+
+test("pinned aws version mismatches do not promise a managed runtime", async () => {
+  await assert.rejects(
+    resolveLocalEnvironments([{ id: "aws", requestedVersion: "2.99.99" }], {
+      cwd: "/project",
+      env: { PATH: "/tools/bin" },
+      probe: createProbe(),
+    }),
+    /requested 2\.99\.99, but the local runtime is 2\.31\.32; the profile resolves local runtimes only/,
   );
 });
 
@@ -106,5 +121,18 @@ test("missing local tools fail with the selected profile name", async () => {
       probe,
     }),
     /kubectl executable was not found/,
+  );
+});
+
+test("aws --version output without an aws-cli version fails closed", async () => {
+  const probe = createProbe();
+  probe.run = async () => "AWS CLI command not found";
+  await assert.rejects(
+    resolveLocalEnvironments([{ id: "aws" }], {
+      cwd: "/project",
+      env: { PATH: "/tools/bin" },
+      probe,
+    }),
+    /did not report an aws-cli version/,
   );
 });

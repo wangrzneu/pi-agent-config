@@ -76,3 +76,23 @@ test("local source fails instead of silently installing a managed object", async
     async localResolver() { throw new Error("node missing"); },
   }), /node missing/);
 });
+
+test("aws fails closed before any managed install approval", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-process-aws-"));
+  let approvals = 0;
+  await assert.rejects(resolveProcessEnvironmentPlan([
+    { id: "aws", requestedVersion: "2.31.32" },
+  ], {
+    cwd: "/project",
+    env: { PATH: "/host/bin" },
+    platform: "linux-arm64",
+    store: new EnvironmentStore(root),
+    config: DEFAULT_SANDBOX_CONFIG.developmentEnvironments,
+    async localResolver() { throw new Error("aws missing"); },
+    async approveInstall() {
+      approvals += 1;
+      return true;
+    },
+  }), /no trusted managed runtime/);
+  assert.equal(approvals, 0);
+});

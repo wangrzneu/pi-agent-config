@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { EnvironmentStore } from "./store.ts";
+import { hasTrustedManagedCatalog, noManagedCatalogMessage } from "./artifact-catalog.ts";
 import type {
   EnvironmentId,
   RequestedEnvironment,
@@ -39,6 +40,11 @@ async function resolveStoredObject(
   selection: RequestedEnvironment,
   context: ManagedEnvironmentResolutionContext,
 ): Promise<{ version: string; objectPath: string }> {
+  // Fail closed before any version-pin messaging for profiles without a
+  // trusted managed catalog; the rationale lives on hasTrustedManagedCatalog.
+  if (!hasTrustedManagedCatalog(selection.id)) {
+    throw new Error(noManagedCatalogMessage(selection.id));
+  }
   const version = selection.requestedVersion;
   if (!version) throw new Error(managedExactVersionMessage([selection.id]));
   const objectPath = await context.store.resolve(context.platform, selection.id, version);
@@ -90,5 +96,6 @@ function profileExecutable(id: EnvironmentId): string {
     case "node": return "node";
     case "pnpm": return "pnpm";
     case "kubectl": return "kubectl";
+    case "aws": return "aws";
   }
 }

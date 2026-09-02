@@ -16,6 +16,7 @@ integrationTest("selected local environments execute together in the Process san
     { id: "node" },
     { id: "pnpm" },
     { id: "kubectl" },
+    { id: "aws" },
   ];
   const profiles = await resolveLocalEnvironments(requested, {
     cwd: process.cwd(),
@@ -60,6 +61,7 @@ integrationTest("selected local environments execute together in the Process san
         "node --version",
         "pnpm --version",
         "kubectl version --client -o json",
+        "aws --version",
       ].join(" && "),
       process.cwd(),
       { onData: (chunk) => chunks.push(chunk), timeout: 60 },
@@ -70,6 +72,7 @@ integrationTest("selected local environments execute together in the Process san
     assert.match(output, /Python \d/);
     assert.match(output, /v\d+\.\d+/);
     assert.match(output, /clientVersion/);
+    assert.match(output, /aws-cli\/\d+\.\d+\.\d+/);
   } finally {
     await tracker.stopAll();
     await SandboxManager.reset().catch(() => undefined);

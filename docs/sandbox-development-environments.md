@@ -2,8 +2,9 @@
 
 This document defines the planned development-environment system for
 [`extensions/sandbox`](../extensions/sandbox). It extends the Process sandbox
-with composable Go, Python, Node.js, pnpm, and kubectl profiles, dynamic
-installation, bounded storage, and session-scoped Kubernetes context grants.
+with composable Go, Python, Node.js, pnpm, kubectl, and AWS CLI profiles,
+dynamic installation, bounded storage, and session-scoped Kubernetes context
+grants.
 
 The design preserves the existing sandbox principles: fail closed, keep user
 credentials out of child processes, and use exact filesystem grants.
@@ -17,8 +18,10 @@ A user can select any compatible combination at sandbox startup:
 - Node.js
 - pnpm
 - kubectl
+- AWS CLI (local resolution only)
 
-Missing runtimes may be installed dynamically. Runtime objects are shared
+Missing runtimes may be installed dynamically, except for the AWS CLI, which
+resolves only already installed local binaries. Runtime objects are shared
 read-only across projects; mutable dependencies and virtual environments are
 project-scoped. Kubernetes credentials remain on the host and only explicitly
 selected contexts are reachable from the sandbox.
@@ -26,7 +29,7 @@ selected contexts are reachable from the sandbox.
 Example:
 
 ```bash
-pi --sandbox-env go@1.26.6,python@3.13.9,node@26.5.0,pnpm@10.33.0,kubectl@1.32.3
+pi --sandbox-env go@1.26.6,python@3.13.9,node@26.5.0,pnpm@10.33.0,kubectl@1.32.3,aws
 ```
 
 ## Current state
@@ -41,9 +44,11 @@ The startup selector, local and managed resolvers, immutable store, restricted
 tar.gz installer, and Kubernetes capability broker are implemented. Official
 manifests cover Go, Node.js, pnpm, and kubectl for supported Darwin/Linux and
 arm64/x64 targets; the pinned Python catalog uses checksum-verified Astral
-`python-build-standalone` archives for `3.11.11`, `3.12.9`, and `3.13.9`.
-Runtime leases and automatic quota/retention LRU pruning are active.
-`/sandbox env` provides status, listing, and pruning commands.
+`python-build-standalone` archives for `3.11.11`, `3.12.9`, and `3.13.9`. The
+AWS CLI profile resolves local installations only and has no managed catalog
+(see Profile behavior). Runtime leases and automatic quota/retention LRU
+pruning are active. `/sandbox env` provides status, listing, and pruning
+commands.
 
 ## Domain model
 
@@ -75,7 +80,7 @@ current initialization.
 {
   "developmentEnvironments": {
     "promptOnStart": true,
-    "selected": ["go", "python", "node", "pnpm", "kubectl"],
+    "selected": ["go", "python", "node", "pnpm", "kubectl", "aws"],
     "install": {
       "mode": "ask",
       "maxSize": "5g",
@@ -86,7 +91,8 @@ current initialization.
       "python": { "version": "3.13.9", "source": "auto" },
       "node": { "version": "26.5.0", "source": "auto" },
       "pnpm": { "version": "10.33.0", "storeScope": "project" },
-      "kubectl": { "version": "1.32.3", "source": "auto" }
+      "kubectl": { "version": "1.32.3", "source": "auto" },
+      "aws": { "source": "auto" }
     }
   },
   "kubernetes": {
@@ -118,6 +124,7 @@ Version hints come from trusted project files:
 - pnpm: `package.json#packageManager`, with `pnpm-workspace.yaml` as a usage hint
 - kubectl: explicit configuration, with an optional recommendation based on a
   selected API server version
+- AWS CLI: explicit configuration only; there is no project file hint
 
 A range or mutable label such as `latest` must resolve to an exact version and
 content digest before installation.
@@ -211,6 +218,26 @@ The kubectl binary is an ordinary Tool Profile: local or managed on the host.
 Selecting the binary grants no cluster access. Official checksums are required. A server-version hint may
 recommend a version, but resolution remains exact and follows Kubernetes
 version-skew rules.
+
+### AWS CLI
+
+The AWS CLI is an ordinary local Tool Profile: the trusted startup probes an
+already installed `aws` with `--version`, parses the `aws-cli/<version>` banner,
+and grants only the binary's canonical directory read-only. There is no managed
+catalog entry: AWS publishes GPG signatures instead of digest sidecars for its
+zip archives, and macOS ships a `.pkg` the restricted installer cannot extract.
+Because managed installation requires verified official digests, requesting a
+managed AWS CLI object fails closed instead of downloading unverifiable
+artifacts. Users install the CLI themselves (Homebrew or the official
+installer) and select `aws` for local resolution.
+
+Credentials stay host-side: `~/.aws` remains unreadable and `AWS_*` environment
+variables are stripped from the sandbox, and `aws` remains in the default
+`hostExec.commands` list, so plain `aws` commands are still promoted to the host
+after approval. Running `aws` inside the sandbox requires an explicit
+credential route such as the mask + TLS-termination + SigV4 re-signing design
+in [`sandbox-credential-clis.md`](sandbox-credential-clis.md) and removing `aws`
+from `hostExec.commands`.
 
 ## Kubernetes context grants
 
@@ -349,6 +376,7 @@ python --version
 node --version
 pnpm --version
 kubectl version --client
+aws --version
 ```
 
 and verifies selected Kubernetes contexts while proving an unselected context
@@ -374,6 +402,8 @@ Completed:
 8. Failure-injection and recovery regression tests: installer HTTP/oversize
    and redirect, gateway non-loopback upstream, and store concurrent publish
    and corrupted/dangling reference recovery.
+9. AWS CLI Tool Profile with local-only resolution and a fail-closed managed
+   rejection (no official digest sidecar; zip/pkg archives unsupported).
 
 Remaining:
 

@@ -43,7 +43,26 @@ export async function resolveTrustedRuntimeManifest(
     case "kubectl": return resolveKubectl(version, platform, target, options);
     case "pnpm": return resolvePnpm(version, platform, options);
     case "python": return resolvePython(version, platform, target, options);
+    case "aws": throw new Error(noManagedCatalogMessage(profile));
   }
+}
+
+/**
+ * The AWS CLI is the only local-only Tool Profile: its official distribution
+ * publishes GPG signatures instead of digest sidecars, and macOS ships a .pkg
+ * the restricted installer cannot extract, so no checksum-verified managed
+ * object can exist for it. The managed resolver, installer, and local version
+ * checks all share this predicate so they fail closed at the earliest point
+ * with one consistent message instead of drifting apart.
+ */
+export function hasTrustedManagedCatalog(profile: EnvironmentId): boolean {
+  return profile !== "aws";
+}
+
+export function noManagedCatalogMessage(profile: EnvironmentId): string {
+  return profile === "aws"
+    ? "AWS CLI has no trusted managed runtime: the official distribution publishes no checksum sidecar. Install aws locally and select it as a local profile"
+    : `No trusted managed runtime catalog exists for ${profile}`;
 }
 
 export async function installTrustedRuntime(

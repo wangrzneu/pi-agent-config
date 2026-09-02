@@ -18,6 +18,7 @@ const LABELS: Record<EnvironmentId, string> = {
   node: "Node.js",
   pnpm: "pnpm",
   kubectl: "kubectl",
+  aws: "AWS CLI",
 };
 
 export async function selectDevelopmentEnvironments(

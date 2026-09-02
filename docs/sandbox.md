@@ -2,7 +2,7 @@
 
 The sandbox extension replaces Pi's built-in `bash` execution backend and intercepts user `!` commands. It uses `@anthropic-ai/sandbox-runtime` to enforce filesystem and network policy with macOS Seatbelt (`sandbox-exec`) or Linux bubblewrap.
 
-For the architecture and the reasoning behind each behavior, see [`sandbox-design.md`](sandbox-design.md). The composable Go/Python/Node.js/pnpm/kubectl environments and Kubernetes credential broker are specified in [`sandbox-development-environments.md`](sandbox-development-environments.md). For a feasibility analysis of replacing the OS-denied `~` access with a FUSE interception gate (authorize-then-allow), see [`sandbox-fuse-gate.md`](sandbox-fuse-gate.md).
+For the architecture and the reasoning behind each behavior, see [`sandbox-design.md`](sandbox-design.md). The composable Go/Python/Node.js/pnpm/kubectl environments (plus a local-only AWS CLI profile) and the Kubernetes credential broker are specified in [`sandbox-development-environments.md`](sandbox-development-environments.md). For a feasibility analysis of replacing the OS-denied `~` access with a FUSE interception gate (authorize-then-allow), see [`sandbox-fuse-gate.md`](sandbox-fuse-gate.md).
 
 ## Design goals
 
@@ -27,11 +27,11 @@ The extension fails closed. If the Process sandbox cannot initialize, `bash` and
 Interactive TUI startup shows a multi-selector when `developmentEnvironments.promptOnStart` is enabled (the default). A comma-separated CLI selection skips that dialog:
 
 ```bash
-pi --sandbox-env go,python,node,pnpm,kubectl
+pi --sandbox-env go,python,node,pnpm,kubectl,aws
 pi --sandbox-env go@1.26.6,python@3.13.9,node@26.5.0,pnpm@10.33.0,kubectl@1.32.3
 ```
 
-The Process sandbox resolves already active/local tools without sourcing a login shell and adds only their canonical runtime roots to shell read access. Missing exact versions can be installed into the content-addressed environment store. pnpm implicitly selects Node.js. `/sandbox` reports the effective profiles, versions, sources, and platform.
+The Process sandbox resolves already active/local tools without sourcing a login shell and adds only their canonical runtime roots to shell read access. Missing exact versions can be installed into the content-addressed environment store. pnpm implicitly selects Node.js. The AWS CLI profile resolves local installations only — AWS publishes no checksum sidecar for its packages, so nothing is downloaded for it. `/sandbox` reports the effective profiles, versions, sources, and platform.
 
 The Process sandbox also supports session-scoped Kubernetes context grants after selecting the kubectl profile:
 
@@ -46,7 +46,7 @@ The Process sandbox also supports session-scoped Kubernetes context grants after
 
 The trusted host reads redacted context metadata and runs `kubectl proxy`; the sandbox receives only a TLS capability gateway and sanitized `KUBECONFIG` on loopback. Exec credential helpers require a separate confirmation. Access defaults to `observe` and the context's namespace. Real kubeconfig tokens, private keys, and helper output never enter the sandbox.
 
-With an exact version, missing Go, Python, Node.js, pnpm, and kubectl runtimes can be installed from hard-coded trusted catalogs. `install.mode` controls `ask|auto|never`. Downloads require HTTPS, verify official SHA-256 or npm SHA-512 integrity, use bounded traversal-safe extraction in a no-network sandboxed subprocess, and publish immutable content-addressed objects. Session leases protect active objects while configured quota and retention drive automatic LRU pruning. Pinned checksum-verified relocatable Python is supported. `/sandbox env status|list|prune` manages the shared runtime store. See [`sandbox-development-environments.md`](sandbox-development-environments.md) for the complete target behavior.
+With an exact version, missing Go, Python, Node.js, pnpm, and kubectl runtimes can be installed from hard-coded trusted catalogs. `install.mode` controls `ask|auto|never`. Downloads require HTTPS, verify official SHA-256 or npm SHA-512 integrity, use bounded traversal-safe extraction in a no-network sandboxed subprocess, and publish immutable content-addressed objects. Session leases protect active objects while configured quota and retention drive automatic LRU pruning. Pinned checksum-verified relocatable Python is supported. `/sandbox env status|list|prune` manages the shared runtime store. See [`sandbox-development-environments.md`](sandbox-development-environments.md) for the complete target behavior, and [`sandbox-credential-clis.md`](sandbox-credential-clis.md) for how `aws` credentials stay on the host.
 
 ## External path authorization
 

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
+import { ENVIRONMENT_IDS } from "./environments/types.ts";
 import { SANDBOX_TEMP_ROOT } from "./sandbox-paths.ts";
 import { errorMessage } from "./util.ts";
 
@@ -30,6 +31,7 @@ export interface DevelopmentEnvironmentsConfig {
       storeScope: "project" | "global";
     };
     kubectl: RuntimeEnvironmentProfileConfig;
+    aws: RuntimeEnvironmentProfileConfig;
   };
 }
 
@@ -183,6 +185,7 @@ export const DEFAULT_SANDBOX_CONFIG: SandboxConfig = {
       node: { source: "auto" },
       pnpm: { storeScope: "project" },
       kubectl: { source: "auto" },
+      aws: { source: "auto" },
     },
   },
   kubernetes: {
@@ -288,7 +291,8 @@ function validateSandboxOverrides(overrides: Record<string, unknown>): void {
     assertOptionalBoolean(environments.promptOnStart, "developmentEnvironments.promptOnStart");
     if (environments.selected !== undefined) {
       if (!Array.isArray(environments.selected) || environments.selected.some((id) => (
-        typeof id !== "string" || !["go", "python", "node", "pnpm", "kubectl"].includes(id)
+        typeof id !== "string"
+          || !(ENVIRONMENT_IDS as readonly string[]).includes(id)
       ))) {
         throw new Error("Invalid developmentEnvironments.selected");
       }
@@ -316,7 +320,7 @@ function validateSandboxOverrides(overrides: Record<string, unknown>): void {
       }
     }
     if (isRecord(environments.profiles)) {
-      for (const id of ["go", "python", "node", "pnpm", "kubectl"] as const) {
+      for (const id of ENVIRONMENT_IDS) {
         const profile = environments.profiles[id];
         if (!isRecord(profile)) continue;
         if (
@@ -381,7 +385,7 @@ function mergeDevelopmentEnvironmentConfig(
     } as DevelopmentEnvironmentsConfig["install"];
   }
   if (isRecord(override.profiles)) {
-    for (const id of ["go", "python", "node", "pnpm", "kubectl"] as const) {
+    for (const id of ENVIRONMENT_IDS) {
       const profileOverride = override.profiles[id];
       if (!isRecord(profileOverride)) continue;
       current.profiles[id] = {

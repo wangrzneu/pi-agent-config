@@ -184,4 +184,8 @@ test("trusted catalog rejects ambiguous manifests, unsupported profiles, and ori
   await assert.rejects(resolveTrustedRuntimeManifest("kubectl", "1.32.3", "linux-arm64", {
     fetch: async () => response(KUBECTL_DIGEST, "https://attacker.example/kubectl.sha256"),
   }), /untrusted origin/);
+  await assert.rejects(
+    resolveTrustedRuntimeManifest("aws", "2.31.32", "linux-arm64"),
+    /no trusted managed runtime/,
+  );
 });

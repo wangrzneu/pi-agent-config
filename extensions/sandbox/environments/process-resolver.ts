@@ -4,7 +4,7 @@ import type {
   EnvironmentInstallMode,
   EnvironmentProfileSource,
 } from "../config.ts";
-import { installTrustedRuntime } from "./artifact-catalog.ts";
+import { installTrustedRuntime, hasTrustedManagedCatalog, noManagedCatalogMessage } from "./artifact-catalog.ts";
 import { composeEnvironmentPlan } from "./composer.ts";
 import type { RuntimeInstallerOptions } from "./installer.ts";
 import { resolveLocalEnvironments } from "./local-resolver.ts";
@@ -97,6 +97,11 @@ export async function provisionManagedObjects(
   const missing: RequestedEnvironment[] = [];
   for (const request of requested) {
     if (!request.requestedVersion) continue;
+    // Fail closed before asking the user to approve a download that no trusted
+    // catalog can serve (currently the local-only AWS CLI profile).
+    if (!hasTrustedManagedCatalog(request.id)) {
+      throw new Error(noManagedCatalogMessage(request.id));
+    }
     const existing = await options.store.resolve(options.platform, request.id, request.requestedVersion);
     if (!existing) missing.push(request);
   }

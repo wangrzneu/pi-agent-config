@@ -57,6 +57,7 @@ test("development environment configuration deep-merges profiles and replaces se
       profiles: {
         node: { version: "22.14.0" },
         pnpm: { version: "10.6.0", storeScope: "global" },
+        aws: { version: "2.31.32", source: "local" },
       },
     },
     kubernetes: { defaultAccess: "rbac" },
@@ -70,8 +71,19 @@ test("development environment configuration deep-merges profiles and replaces se
   assert.equal(config.developmentEnvironments.profiles.pnpm.version, "10.6.0");
   assert.equal(config.developmentEnvironments.profiles.pnpm.storeScope, "global");
   assert.equal(config.developmentEnvironments.profiles.go.source, "auto");
+  assert.equal(config.developmentEnvironments.profiles.aws.version, "2.31.32");
+  assert.equal(config.developmentEnvironments.profiles.aws.source, "local");
   assert.equal(config.kubernetes.defaultAccess, "rbac");
   assert.equal(config.kubernetes.credentialMode, "host-broker");
+});
+
+test("unknown development environment selections are rejected", () => {
+  assert.throws(() => mergeSandboxConfig(DEFAULT_SANDBOX_CONFIG, {
+    developmentEnvironments: { selected: ["aws", "terraform"] },
+  }), /developmentEnvironments\.selected/);
+  assert.throws(() => mergeSandboxConfig(DEFAULT_SANDBOX_CONFIG, {
+    developmentEnvironments: { profiles: { aws: { source: "managed-only" } } },
+  }), /developmentEnvironments\.profiles\.aws\.source/);
 });
 
 test("invalid install and Kubernetes access modes never become permissive", () => {

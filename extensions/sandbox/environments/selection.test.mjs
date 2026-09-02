@@ -10,6 +10,7 @@ const config = {
     node: { version: "22.14.0", source: "auto" },
     pnpm: { version: "10.6.0", storeScope: "project" },
     kubectl: { version: "1.32.3", source: "auto" },
+    aws: { version: "2.23.15", source: "auto" },
   },
 };
 
@@ -41,6 +42,16 @@ test("pnpm automatically requests the configured Node.js profile", () => {
     { id: "node", requestedVersion: "22.14.0", implicit: true },
     { id: "pnpm", requestedVersion: "10.6.0" },
   ]);
+});
+
+test("aws selects the local-only AWS CLI profile with the configured version", () => {
+  assert.deepEqual(resolveEnvironmentSelection("aws@2.31.32", config), [
+    { id: "aws", requestedVersion: "2.31.32" },
+  ]);
+  assert.deepEqual(resolveEnvironmentSelection(undefined, {
+    ...config,
+    selected: ["aws"],
+  }), [{ id: "aws", requestedVersion: "2.23.15" }]);
 });
 
 test("none explicitly clears configured environment selection", () => {

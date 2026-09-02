@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { access, realpath } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
+import { hasTrustedManagedCatalog } from "./artifact-catalog.ts";
 import type {
   EnvironmentId,
   RequestedEnvironment,
@@ -93,7 +94,34 @@ async function resolveOne(
       return resolveSimpleVersionedTool("pnpm", ["--version"], context.cwd, context.env, probe);
     case "kubectl":
       return resolveKubectl(context.cwd, context.env, probe);
+    case "aws":
+      return resolveAws(context.cwd, context.env, probe);
   }
+}
+
+async function resolveAws(
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  probe: LocalEnvironmentProbe,
+): Promise<ResolvedEnvironment> {
+  const commandPath = await requireExecutable("aws", cwd, env, probe);
+  const [canonicalExecutable, output] = await Promise.all([
+    probe.canonicalize(commandPath),
+    probe.run(commandPath, ["--version"], env),
+  ]);
+  // AWS CLI v1 and v2 both start the version banner with `aws-cli/<version>`;
+  // anything else fails closed instead of guessing.
+  const version = /aws-cli\/(\S+)/.exec(output.trim())?.[1];
+  // Fail closed without echoing raw tool output, like the other resolvers.
+  if (!version) throw new Error("aws --version did not report an aws-cli version");
+  return {
+    id: "aws",
+    version: normalizeVersion("aws", version),
+    source: "local",
+    binDirectories: [dirname(commandPath)],
+    env: {},
+    allowRead: [dirname(canonicalExecutable)],
+  };
 }
 
 async function resolveGo(
@@ -261,9 +289,12 @@ function assertRequestedVersion(requested: RequestedEnvironment, actual: string)
   if (requested.requestedVersion === undefined) return;
   const expected = normalizeVersion(requested.id, requested.requestedVersion);
   if (expected !== actual) {
-    throw new Error(
-      `${requested.id} requested ${expected}, but the local runtime is ${actual}; a matching managed runtime is required`,
-    );
+    // Only promise the managed fallback for profiles the trusted catalog can
+    // actually serve; the AWS CLI resolves local runtimes only.
+    const remedy = hasTrustedManagedCatalog(requested.id)
+      ? "a matching managed runtime is required"
+      : "the profile resolves local runtimes only";
+    throw new Error(`${requested.id} requested ${expected}, but the local runtime is ${actual}; ${remedy}`);
   }
 }
 

@@ -190,7 +190,7 @@ export function registerSandboxExtension(
   });
 
   pi.registerFlag("sandbox-env", {
-    description: "Comma-separated development environments, for example go@1.24.2,python,node,pnpm,kubectl",
+    description: "Comma-separated development environments, for example go@1.24.2,python,node,pnpm,kubectl,aws",
     type: "string",
   });
 

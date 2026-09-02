@@ -50,3 +50,14 @@ test("stored resolver fails closed for unpinned or missing objects", async () =>
     /is not installed/,
   );
 });
+
+test("aws is a local-only profile and never resolves a managed object", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-managed-aws-"));
+  const store = new EnvironmentStore(root);
+  await store.initialize();
+  await publishFixture(store, "aws", "2.31.32", "a");
+  await assert.rejects(
+    resolveStoredEnvironments([{ id: "aws", requestedVersion: "2.31.32" }], { store, platform: "linux-arm64" }),
+    /no trusted managed runtime/,
+  );
+});
