@@ -4,6 +4,7 @@ import { access, realpath } from "node:fs/promises";
 import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { hasTrustedManagedCatalog } from "./artifact-catalog.ts";
+import { goCacheProfileFragment } from "./go-cache.ts";
 import type {
   EnvironmentId,
   RequestedEnvironment,
@@ -139,13 +140,15 @@ async function resolveGo(
     throw new Error("go env did not return GOROOT and GOVERSION");
   }
   const root = await probe.canonicalize(parsed.GOROOT);
+  const cache = goCacheProfileFragment(env);
   return {
     id: "go",
     version: normalizeVersion("go", parsed.GOVERSION),
     source: "local",
     binDirectories: [join(root, "bin")],
-    env: { GOROOT: root, GOENV: "off" },
-    allowRead: [root],
+    env: { GOROOT: root, GOENV: "off", ...cache.env },
+    allowRead: [root, ...cache.allowRead],
+    allowWrite: cache.allowWrite,
   };
 }
 

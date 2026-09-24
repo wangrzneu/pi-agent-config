@@ -8,12 +8,12 @@ For the architecture and the reasoning behind each behavior, see [`sandbox-desig
 
 The defaults are intended for everyday, iterative coding:
 
-- Project files are readable by default. User data outside the workspace is denied until the user grants a file or directory for the current session.
+- Project files are readable by default. User data outside the workspace is denied until the user grants a file or directory for the current session. A selected `go` development environment is the documented exception: it grants the host Go module and build caches read/write so builds reuse them (see [`sandbox-design.md`](sandbox-design.md)).
 - Shell startup retains a platform-specific read-only baseline for operating-system libraries, toolchains, device metadata, and temporary files; this baseline is not exposed as general permission for Pi's direct file-reading tools.
 - Project files are writable by default. External writes require session approval. Tool caches (npm, pnpm, Yarn, Go, Cargo, and friends) and a private per-process sandbox directory are writable without approval.
 - The per-user OS temporary directory (`TMPDIR`/`/var/folders/...` on macOS, `/tmp` on Linux) is readable and writable so compilers, runtimes, and git/xcrun can create transient cache files. The runtime also redirects the child's `TMPDIR` to its own managed scratch path regardless of configuration.
-- On macOS the sandbox grants the system trustd service (`enableWeakerNetworkIsolation`) so tools that verify TLS certificates through the system trust store work: newer pip (via `truststore`), Go modules, `gh`, `gcloud`, and similar. Go's module and checksum (`GOMODCACHE`, `GOPATH`/sumdb) caches are redirected into the sandbox cache.
-- npm, pnpm, Yarn, Python, Go, Cargo, Gradle, NuGet, and Deno caches are redirected to a process-scoped temporary cache so dependency installation works without granting writes across the home directory.
+- On macOS the sandbox grants the system trustd service (`enableWeakerNetworkIsolation`) so tools that verify TLS certificates through the system trust store work: newer pip (via `truststore`), Go modules, `gh`, `gcloud`, and similar. A selected `go` profile grants read/write access to the host `GOMODCACHE` and `GOCACHE` so modules and build artifacts are reused; `GOPATH` stays in the sandbox scratch so `go install` keeps writing `$GOPATH/bin` there.
+- npm, pnpm, Yarn, Python, Cargo, Gradle, NuGet, and Deno caches are redirected to a process-scoped temporary cache so dependency installation works without granting writes across the home directory. Go caches follow the same rule unless the `go` development environment is selected, in which case `GOMODCACHE` and `GOCACHE` point at the granted host caches instead.
 - Common source hosts and package registries are reachable. An unlisted domain pauses the connection and requests session authorization; explicit deny rules remain blocked.
 - Local port binding and loopback connections are allowed for test servers and development servers.
 - Common API and package tokens are removed from the child environment.

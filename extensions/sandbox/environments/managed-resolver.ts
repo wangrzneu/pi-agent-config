@@ -3,6 +3,7 @@ import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { EnvironmentStore } from "./store.ts";
 import { hasTrustedManagedCatalog, noManagedCatalogMessage } from "./artifact-catalog.ts";
+import { goCacheProfileFragment } from "./go-cache.ts";
 import type {
   EnvironmentId,
   RequestedEnvironment,
@@ -12,6 +13,8 @@ import type {
 export interface ManagedEnvironmentResolutionContext {
   store: EnvironmentStore;
   platform: string;
+  /** Host environment used to resolve Go cache roots; defaults to process.env. */
+  env?: NodeJS.ProcessEnv;
 }
 
 export function managedExactVersionMessage(ids: readonly EnvironmentId[]): string {
@@ -28,10 +31,11 @@ export async function resolveStoredEnvironments(
   context: ManagedEnvironmentResolutionContext,
 ): Promise<ResolvedEnvironment[]> {
   await context.store.initialize();
+  const hostEnv = context.env ?? process.env;
   const profiles: ResolvedEnvironment[] = [];
   for (const selection of requested) {
     const { version, objectPath } = await resolveStoredObject(selection, context);
-    profiles.push(managedProfile(selection.id, version, objectPath));
+    profiles.push(managedProfile(selection.id, version, objectPath, hostEnv));
   }
   return profiles;
 }
@@ -67,11 +71,19 @@ function managedProfile(
   id: EnvironmentId,
   version: string,
   target: string,
+  hostEnv: NodeJS.ProcessEnv,
 ): ResolvedEnvironment {
   const env: Record<string, string | undefined> = {};
+  const allowRead: string[] = [target];
+  let allowWrite: string[] | undefined;
   if (id === "go") {
+    const cache = goCacheProfileFragment(hostEnv);
     env.GOROOT = target;
     env.GOENV = "off";
+    // Managed Go reuses the same host module/build caches as a local one.
+    Object.assign(env, cache.env);
+    allowRead.push(...cache.allowRead);
+    allowWrite = cache.allowWrite;
   } else if (id === "python") {
     env.PYTHONNOUSERSITE = "1";
     env.PYTHONPATH = undefined;
@@ -83,7 +95,8 @@ function managedProfile(
     source: "managed",
     binDirectories: [join(target, "bin")],
     env,
-    allowRead: [target],
+    allowRead,
+    allowWrite,
   };
 }
 

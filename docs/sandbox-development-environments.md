@@ -175,17 +175,31 @@ Selected profile bin directories precede the inherited host `PATH`.
 
 Environment merge order is: Pi command environment, selected profile values,
 git identity, sandbox-owned cache/temp/config overrides, then ASRT credential
-filtering. Adapters cannot override sandbox-owned `GOPATH`, cache roots,
-`PIP_CONFIG_FILE`, or temporary directories. Conflicting values fail instead of
-silently depending on adapter order.
+filtering. Adapters cannot override sandbox-owned `GOPATH`, `PIP_CONFIG_FILE`,
+or temporary directories. The Go profile deliberately owns `GOMODCACHE` and
+`GOCACHE` so a selected Go runtime reuses the host caches; any other profile is
+expected to leave cache roots to the sandbox. Conflicting values fail instead
+of silently depending on adapter order.
 
 ## Profile behavior
 
 ### Go
 
 Process probes an explicit/local `go` with `GOENV=off go env -json GOROOT
-GOVERSION`, canonicalizes `GOROOT`, and avoids user Go configuration. Managed
-host objects use the same sandbox-owned `GOCACHE`, `GOMODCACHE`, and `GOPATH`.
+GOVERSION`, canonicalizes `GOROOT`, and avoids user Go configuration. Local and
+managed Go runtimes both point `GOMODCACHE` and `GOCACHE` at the host roots
+(environment variables first, then Go's platform defaults) and are granted
+read/write access to exactly those two roots, so downloaded modules and
+incremental build artifacts are reused across sessions instead of being
+recreated in the sandbox scratch cache. `GOPATH` stays sandbox-owned, so
+`go install` keeps writing `$GOPATH/bin` into scratch rather than the user's
+home. Roots are canonicalized against their existing prefix, and a root that
+would expose the filesystem root, the home directory, or one of its ancestors
+fails closed. Because both the probe and the child run with `GOENV=off`, a
+`go env -w` customization in the `GOENV` file is intentionally ignored — the
+sandbox uses environment variables and defaults consistently. `denyWrite`
+patterns still take precedence over these grants. Without a selected go
+profile `GOMODCACHE` and `GOCACHE` keep pointing at the sandbox cache.
 
 ### Python
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,6 +33,31 @@ test("stored resolver exposes managed objects directly to the Process backend", 
   assert.deepEqual(profiles[0].binDirectories, [join(objectPath, "bin")]);
   assert.deepEqual(profiles[0].allowRead, [objectPath]);
   assert.equal(profiles[0].source, "managed");
+});
+
+test("stored go profiles reuse the host module and build caches", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-stored-go-"));
+  const store = new EnvironmentStore(root);
+  await store.initialize();
+  const objectPath = await publishFixture(store, "go", "1.24.2", "b", "go");
+  const home = realpathSync(await mkdtemp(join(tmpdir(), "pi-stored-go-home-")));
+  const moduleCache = join(home, "go", "pkg", "mod");
+  const buildCache = process.platform === "darwin"
+    ? join(home, "Library", "Caches", "go-build")
+    : join(home, ".cache", "go-build");
+
+  const profiles = await resolveStoredEnvironments([
+    { id: "go", requestedVersion: "1.24.2" },
+  ], { store, platform: "linux-arm64", env: { HOME: home } });
+
+  assert.deepEqual(profiles[0].env, {
+    GOROOT: objectPath,
+    GOENV: "off",
+    GOMODCACHE: moduleCache,
+    GOCACHE: buildCache,
+  });
+  assert.deepEqual(profiles[0].allowWrite, [moduleCache, buildCache]);
+  assert.deepEqual(profiles[0].allowRead, [objectPath, moduleCache, buildCache]);
 });
 
 test("stored resolver fails closed for unpinned or missing objects", async () => {

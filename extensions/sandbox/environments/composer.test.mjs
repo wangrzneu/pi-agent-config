@@ -39,6 +39,29 @@ test("environment plans compose PATH, variables, and read roots deterministicall
     "/usr/local/go",
     "/Users/me/project/.venv",
   ]);
+  assert.deepEqual(plan.allowWrite, []);
+});
+
+test("writable profile roots are implicitly readable", () => {
+  const plan = composeEnvironmentPlan(base, [{
+    id: "go",
+    version: "1.24.2",
+    source: "local",
+    binDirectories: ["/usr/local/go/bin"],
+    env: {},
+    allowRead: ["/usr/local/go"],
+    allowWrite: ["/home/me/go/pkg", "/home/me/Library/Caches/go-build"],
+  }]);
+
+  assert.deepEqual(plan.allowWrite, [
+    "/home/me/go/pkg",
+    "/home/me/Library/Caches/go-build",
+  ]);
+  assert.deepEqual(plan.allowRead, [
+    "/usr/local/go",
+    "/home/me/go/pkg",
+    "/home/me/Library/Caches/go-build",
+  ]);
 });
 
 test("duplicate paths are removed without changing first-use order", () => {

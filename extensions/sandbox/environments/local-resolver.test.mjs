@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { realpathSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { resolveLocalEnvironments } from "./local-resolver.ts";
 
@@ -49,9 +53,14 @@ const requested = [
 ];
 
 test("local resolver produces composable profiles without sourcing a shell", async () => {
+  const home = realpathSync(await mkdtemp(join(tmpdir(), "pi-local-go-")));
+  const moduleCache = join(home, "go", "pkg", "mod");
+  const buildCache = process.platform === "darwin"
+    ? join(home, "Library", "Caches", "go-build")
+    : join(home, ".cache", "go-build");
   const profiles = await resolveLocalEnvironments(requested, {
     cwd: "/project",
-    env: { PATH: "/tools/bin", VIRTUAL_ENV: "/project/.venv" },
+    env: { PATH: "/tools/bin", HOME: home, VIRTUAL_ENV: "/project/.venv" },
     probe: createProbe(),
   });
 
@@ -63,7 +72,14 @@ test("local resolver produces composable profiles without sourcing a shell", asy
     { id: "kubectl", version: "1.32.3" },
     { id: "aws", version: "2.31.32" },
   ]);
-  assert.deepEqual(profiles[0].env, { GOROOT: "/tools/go", GOENV: "off" });
+  assert.deepEqual(profiles[0].env, {
+    GOROOT: "/tools/go",
+    GOENV: "off",
+    GOMODCACHE: moduleCache,
+    GOCACHE: buildCache,
+  });
+  assert.deepEqual(profiles[0].allowRead, ["/tools/go", moduleCache, buildCache]);
+  assert.deepEqual(profiles[0].allowWrite, [moduleCache, buildCache]);
   assert.deepEqual(profiles[1].env, {
     VIRTUAL_ENV: "/project/.venv",
     PYTHONNOUSERSITE: "1",

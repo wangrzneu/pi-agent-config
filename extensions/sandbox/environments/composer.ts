@@ -15,13 +15,17 @@ export function composeEnvironmentPlan(
   const ids = new Set<string>();
   const pathEntries: string[] = [];
   const allowRead: string[] = [];
+  const allowWrite: string[] = [];
   const env = new Map<string, { value: string | undefined; owner: string }>();
 
   for (const profile of profiles) {
     if (ids.has(profile.id)) throw new Error(`Duplicate resolved sandbox environment: ${profile.id}`);
     ids.add(profile.id);
     pathEntries.push(...profile.binDirectories);
-    allowRead.push(...profile.allowRead);
+    // A writable root must also be readable: macOS Seatbelt grants read and
+    // write as separate rules, so a write-only grant would still block reads.
+    allowRead.push(...profile.allowRead, ...(profile.allowWrite ?? []));
+    allowWrite.push(...(profile.allowWrite ?? []));
 
     for (const [name, value] of Object.entries(profile.env)) {
       if (name === "PATH") {
@@ -47,6 +51,7 @@ export function composeEnvironmentPlan(
     profiles: [...profiles],
     env: composedEnv,
     allowRead: unique(allowRead),
+    allowWrite: unique(allowWrite),
   };
 }
 

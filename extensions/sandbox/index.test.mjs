@@ -234,6 +234,7 @@ test("selected Process development environments inject env and exact read roots"
           binDirectories: ["/managed/go/bin"],
           env: { GOROOT: "/managed/go", GOENV: "off" },
           allowRead: ["/managed/go"],
+          allowWrite: ["/host/go-cache"],
         } : {
           id: "python",
           version: "3.13.2",
@@ -260,6 +261,7 @@ test("selected Process development environments inject env and exact read roots"
   const commandConfig = fake.commandConfigs().at(-1);
   assert.ok(commandConfig.filesystem.allowRead.includes("/managed/go"));
   assert.ok(commandConfig.filesystem.allowRead.includes("/managed/python"));
+  assert.ok(commandConfig.filesystem.allowWrite.includes("/host/go-cache"));
   await harness.commands.get("sandbox")("", harness.ctx);
   assert.match(harness.notifications.at(-1).message, /go: 1\.24\.2 \(local/);
   assert.match(harness.notifications.at(-1).message, /python: 3\.13\.2 \(local/);

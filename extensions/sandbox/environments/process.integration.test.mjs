@@ -47,6 +47,10 @@ integrationTest("selected local environments execute together in the Process san
           ...(DEFAULT_SANDBOX_CONFIG.filesystem.allowRead ?? []),
           ...plan.allowRead,
         ],
+        allowWrite: [
+          ...DEFAULT_SANDBOX_CONFIG.filesystem.allowWrite,
+          ...plan.allowWrite,
+        ],
       },
     }),
     undefined,

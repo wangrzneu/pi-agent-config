@@ -16,6 +16,12 @@ export interface ResolvedEnvironment {
   binDirectories: string[];
   env: Record<string, string | undefined>;
   allowRead: string[];
+  /**
+   * Roots the profile needs writable (for example the host Go module and build
+   * caches). Writable roots are implicitly readable; leave unset or empty when
+   * the profile only needs read access.
+   */
+  allowWrite?: string[];
 }
 
 export interface EnvironmentPlan {
@@ -23,4 +29,5 @@ export interface EnvironmentPlan {
   profiles: ResolvedEnvironment[];
   env: Record<string, string | undefined>;
   allowRead: string[];
+  allowWrite: string[];
 }

@@ -172,6 +172,7 @@ export function registerSandboxExtension(
         ],
         allowWrite: [
           ...filesystem.allowWrite,
+          ...(activeEnvironmentPlan?.allowWrite ?? []),
           ...writeAuthorization.paths(),
         ],
         denyWrite: [

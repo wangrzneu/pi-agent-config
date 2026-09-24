@@ -113,6 +113,14 @@ export function codingCacheEnvironment(
   gitIdentity?: GitIdentity,
   developmentEnvironment?: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
+  // A selected go profile points the module and build caches at the host
+  // caches it was granted. GOPATH stays sandbox-owned so `go install` writes
+  // `$GOPATH/bin` into scratch instead of the user's home.
+  const goCache = {
+    GOCACHE: developmentEnvironment?.GOCACHE ?? join(CACHE_ROOT, "go-build"),
+    GOMODCACHE: developmentEnvironment?.GOMODCACHE ?? join(CACHE_ROOT, "go-mod"),
+    GOPATH: join(CACHE_ROOT, "go-path"),
+  };
   return {
     ...env,
     ...developmentEnvironment,
@@ -132,13 +140,11 @@ export function codingCacheEnvironment(
     YARN_CACHE_FOLDER: join(CACHE_ROOT, "yarn"),
     PIP_CACHE_DIR: join(CACHE_ROOT, "pip"),
     UV_CACHE_DIR: join(CACHE_ROOT, "uv"),
-    GOCACHE: join(CACHE_ROOT, "go-build"),
-    GOMODCACHE: join(CACHE_ROOT, "go-mod"),
-    GOPATH: join(CACHE_ROOT, "go-path"),
     CARGO_HOME: join(CACHE_ROOT, "cargo"),
     GRADLE_USER_HOME: join(CACHE_ROOT, "gradle"),
     NUGET_PACKAGES: join(CACHE_ROOT, "nuget"),
     DENO_DIR: join(CACHE_ROOT, "deno"),
+    ...goCache,
   };
 }
 

@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import test from "node:test";
 import {
   codingCacheEnvironment,
   createSandboxedBashOperations,
   SandboxProcessTracker,
 } from "./process.ts";
+import { SANDBOX_TEMP_ROOT } from "./sandbox-paths.ts";
 
 function createRuntime() {
   let cleanups = 0;
@@ -36,7 +38,7 @@ test("coding caches are redirected into a writable process-scoped temp area", ()
   assert.match(env.GOPATH, /pi-sandbox-\d+-[0-9a-f-]+\/cache\/go-path$/);
 });
 
-test("selected development environments are merged before sandbox-owned cache overrides", () => {
+test("selected development environments own the go module and build caches they were granted", () => {
   const env = codingCacheEnvironment(
     { PATH: "/bin", PYTHONPATH: "/host/packages", GOCACHE: "/host/go-cache" },
     undefined,
@@ -44,13 +46,24 @@ test("selected development environments are merged before sandbox-owned cache ov
       PATH: "/managed/python/bin:/managed/go/bin:/bin",
       PYTHONPATH: undefined,
       GOCACHE: "/profile/go-cache",
+      GOMODCACHE: "/profile/go-mod",
+      GOPATH: "/profile/go-path",
     },
   );
 
   assert.equal(env.PATH, "/managed/python/bin:/managed/go/bin:/bin");
   assert.equal(env.PYTHONPATH, undefined);
-  assert.notEqual(env.GOCACHE, "/profile/go-cache");
-  assert.match(env.GOCACHE, /pi-sandbox-\d+-[0-9a-f-]+\/cache\/go-build$/);
+  assert.equal(env.GOCACHE, "/profile/go-cache");
+  assert.equal(env.GOMODCACHE, "/profile/go-mod");
+  // GOPATH is sandbox-owned even when a profile tries to override it.
+  assert.equal(env.GOPATH, join(SANDBOX_TEMP_ROOT, "cache", "go-path"));
+});
+
+test("go caches stay in the sandbox scratch area without a go profile", () => {
+  const env = codingCacheEnvironment({ PATH: "/bin", GOCACHE: "/host/go-cache" });
+  assert.equal(env.GOCACHE, join(SANDBOX_TEMP_ROOT, "cache", "go-build"));
+  assert.equal(env.GOMODCACHE, join(SANDBOX_TEMP_ROOT, "cache", "go-mod"));
+  assert.equal(env.GOPATH, join(SANDBOX_TEMP_ROOT, "cache", "go-path"));
 });
 
 test("sandboxed bash injects the git author identity into the child", async () => {

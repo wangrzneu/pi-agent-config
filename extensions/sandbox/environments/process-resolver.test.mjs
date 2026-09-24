@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { DEFAULT_SANDBOX_CONFIG } from "../config.ts";
+import { UnsafeGoCacheRootError } from "./go-cache.ts";
 import { resolveProcessEnvironmentPlan } from "./process-resolver.ts";
 import { EnvironmentStore } from "./store.ts";
 
@@ -75,6 +76,22 @@ test("local source fails instead of silently installing a managed object", async
     config,
     async localResolver() { throw new Error("node missing"); },
   }), /node missing/);
+});
+
+test("an unsafe go cache root fails the plan instead of falling back to managed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-process-unsafe-go-"));
+  await assert.rejects(resolveProcessEnvironmentPlan([
+    { id: "go", requestedVersion: "1.24.2" },
+  ], {
+    cwd: "/project",
+    env: { PATH: "/host/bin" },
+    platform: "linux-arm64",
+    store: new EnvironmentStore(root),
+    config: DEFAULT_SANDBOX_CONFIG.developmentEnvironments,
+    async localResolver() {
+      throw new UnsafeGoCacheRootError("GOCACHE must not be the filesystem root");
+    },
+  }), /GOCACHE must not be the filesystem root/);
 });
 
 test("aws fails closed before any managed install approval", async () => {

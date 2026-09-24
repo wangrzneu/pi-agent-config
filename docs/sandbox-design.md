@@ -27,7 +27,9 @@ coding") and long-running work:
    only escape hatch and it is explicit.
 2. **Workspace is the trust boundary for user data.** Reads and writes outside
    the workspace require a per-session grant. Machine-owned paths (OS temp,
-   Pi's own resources) are exempt because they are not user credentials.
+   Pi's own resources) are exempt because they are not user credentials. The
+   one deliberate exception is a selected Go development environment, which
+   reuses the host module and build caches (see Decision 1).
 3. **Two enforcement layers, one policy.** The OS child sandbox (Seatbelt /
    bubblewrap via `@anthropic-ai/sandbox-runtime`) enforces filesystem and
    network rules on shell children; the `tool_call` interceptor enforces the
@@ -114,6 +116,14 @@ source of authorization friction in practice (`/tmp/pr16-wt` review checkouts,
 `~/.pi/agent/git/.../skills/SKILL.md`). The tool gate mirrors the OS
 allowlist so `read` behaves like `bash cat` (previous mismatch caused
 confusing "authorize a temp file" prompts).
+
+**Exception — selected Go caches.** When the `go` development environment is
+selected, its module and build caches (`GOMODCACHE`, `GOCACHE`) are granted
+read/write without a prompt, because re-downloading and re-building every
+session is the friction the profile exists to remove. The grant is exactly
+those two roots: `GOPATH` stays sandbox-owned, values are canonicalized, and
+roots that would expose the filesystem root, the home directory, or one of its
+ancestors fail closed.
 
 ### 2. Fail-closed initialization
 
@@ -210,10 +220,13 @@ re-runs `session_start`.
 ## Environment injection summary
 
 `codingCacheEnvironment` redirections keep builds hermetic and credentials
-out: caches (npm/pnpm/yarn/pip/uv/go/cargo/gradle/nuget/deno) → sandbox root;
+out: caches (npm/pnpm/yarn/pip/uv/cargo/gradle/nuget/deno) → sandbox root;
 `TMPDIR` → runtime-managed scratch; `GIT_CONFIG_GLOBAL`/`npm_config_userconfig`
 → `/dev/null`; sensitive token env vars are unset by the runtime's credentials
-section; git identity → injected env (Decision 5).
+section; git identity → injected env (Decision 5). A selected `go` profile is
+the exception: it owns `GOMODCACHE` and `GOCACHE`, which point at the host
+caches the profile was granted read/write access to. `GOPATH` stays
+sandbox-owned so `go install` writes `$GOPATH/bin` into scratch.
 
 ## Open considerations
 

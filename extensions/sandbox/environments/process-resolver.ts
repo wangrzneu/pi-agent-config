@@ -6,6 +6,7 @@ import type {
 } from "../config.ts";
 import { installTrustedRuntime, hasTrustedManagedCatalog, noManagedCatalogMessage } from "./artifact-catalog.ts";
 import { composeEnvironmentPlan } from "./composer.ts";
+import { UnsafeGoCacheRootError } from "./go-cache.ts";
 import type { RuntimeInstallerOptions } from "./installer.ts";
 import { resolveLocalEnvironments } from "./local-resolver.ts";
 import { resolveStoredEnvironments } from "./managed-resolver.ts";
@@ -57,7 +58,9 @@ export async function resolveProcessEnvironmentPlan(
       if (!profile) throw new Error(`${request.id} local resolver returned no profile`);
       profilesById.set(request.id, profile);
     } catch (error) {
-      if (source === "local") throw error;
+      // An unsafe cache root is a hard configuration error, not a reason to
+      // silently fall back to a managed download that cannot satisfy it.
+      if (source === "local" || error instanceof UnsafeGoCacheRootError) throw error;
       managedRequests.push(request);
     }
   }
@@ -74,6 +77,7 @@ export async function resolveProcessEnvironmentPlan(
     const managedProfiles = await resolveStoredEnvironments(managedRequests, {
       store: options.store,
       platform: options.platform,
+      env: options.env,
     });
     for (const profile of managedProfiles) profilesById.set(profile.id, profile);
   }
