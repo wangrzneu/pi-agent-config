@@ -17,6 +17,7 @@ import { readSystemOneConfig, SYSTEM_ONE_DEFAULTS } from "./config.ts";
 import { MAX_STATE_CHARACTERS, WORKFLOW_QUESTION } from "./routing.ts";
 import { RISK_QUESTION } from "./risk.ts";
 import { COMPLETION_QUESTION } from "./completion.ts";
+import { buildContextQuestions, type ContextCandidate } from "./context.ts";
 import type { ChoiceQuestion, DecisionKind, DecisionResult, SystemOneClient } from "./types.ts";
 
 const CACHE_ENTRIES = 128;
@@ -43,6 +44,12 @@ export interface WorkflowService {
     state: string,
     signal?: AbortSignal,
   ): Promise<DecisionResult | undefined>;
+  /** Rank candidate files by relevance; returns question-id → probability. */
+  rankContext(
+    state: string,
+    candidates: readonly ContextCandidate[],
+    signal?: AbortSignal,
+  ): Promise<Record<string, number> | undefined>;
   /** Minimum confidence for one decision before its caller acts. */
   threshold(decision: DecisionKind): number;
   status(): WorkflowServiceStatus;
@@ -65,6 +72,7 @@ export function createWorkflowService(
   options: WorkflowServiceOptions,
 ): WorkflowService {
   const cache = new Map<string, DecisionResult>();
+  const contextCache = new Map<string, Record<string, number>>();
   let enabled = options.enabled ?? true;
 
   const decide = async (
@@ -104,6 +112,36 @@ export function createWorkflowService(
     assessChangeRisk: (state, signal) => decide(RISK_QUESTION, state, signal),
     assessCompletion: (state, signal) =>
       decide(COMPLETION_QUESTION, state, signal),
+    rankContext: async (state, candidates, signal) => {
+      if (!enabled) return undefined;
+
+      const trimmed = state.trim();
+      const client = options.getClient();
+      if (!client || !trimmed || candidates.length === 0) return undefined;
+
+      const key = createHash("sha256")
+        .update(`${trimmed}\n${candidates.map((c) => c.id).join("\n")}`)
+        .digest("hex");
+      const cached = contextCache.get(key);
+      if (cached) return cached;
+
+      const assessment = await client.assessNoul(
+        {
+          questions: buildContextQuestions(candidates),
+          state: trimmed,
+          maxStateCharacters: MAX_STATE_CHARACTERS,
+        },
+        signal,
+      );
+      if (!assessment) return undefined;
+
+      if (contextCache.size >= CACHE_ENTRIES) {
+        const oldest = contextCache.keys().next().value;
+        if (oldest) contextCache.delete(oldest);
+      }
+      contextCache.set(key, assessment.probabilities);
+      return assessment.probabilities;
+    },
     threshold: (decision) =>
       options.getThreshold?.(decision) ?? SYSTEM_ONE_DEFAULTS.thresholds[decision],
     status: () => options.getStatus?.() ?? { configured: false },

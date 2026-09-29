@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createWorkflowService } from "./service.ts";
 import { DEFAULT_ROUTING_THRESHOLD, MAX_STATE_CHARACTERS, WORKFLOW_SCHEMA } from "./routing.ts";
+import { DEFAULT_CONTEXT_THRESHOLD } from "./context.ts";
 import { RISK_SCHEMA } from "./risk.ts";
 import { COMPLETION_SCHEMA } from "./completion.ts";
 
-function fakeClient(result) {
-  const calls = { count: 0, requests: [] };
+function fakeClient(result, noulResult) {
+  const calls = { count: 0, requests: [], noulCount: 0, noulRequests: [] };
   return {
     calls,
     client: {
@@ -14,6 +15,11 @@ function fakeClient(result) {
         calls.count++;
         calls.requests.push(request);
         return result;
+      },
+      async assessNoul(request) {
+        calls.noulCount++;
+        calls.noulRequests.push(request);
+        return noulResult;
       },
     },
   };
@@ -114,9 +120,48 @@ test("assesses completion with the completion question", async () => {
   ]);
 });
 
+test("ranks context with one noul request and caches it", async () => {
+  const { client, calls } = fakeClient(
+    { choice: "low", confidence: 0.9 },
+    { probabilities: { candidate_0: 0.9, candidate_1: 0.1 } },
+  );
+  const service = createWorkflowService({ getClient: () => client });
+
+  const first = await service.rankContext("add login", [{ id: "a.ts" }, { id: "b.ts" }]);
+  assert.deepEqual(first, { candidate_0: 0.9, candidate_1: 0.1 });
+  assert.equal(calls.noulCount, 1);
+  assert.equal(calls.noulRequests[0].questions.length, 2);
+  assert.equal(calls.noulRequests[0].questions[0].id, "candidate_0");
+
+  await service.rankContext("add login", [{ id: "a.ts" }, { id: "b.ts" }]);
+  assert.equal(calls.noulCount, 1);
+
+  await service.rankContext("add login", [{ id: "a.ts" }, { id: "c.ts" }]);
+  assert.equal(calls.noulCount, 2);
+});
+
+test("rankContext is inert when disabled, unconfigured, or empty", async () => {
+  const { client, calls } = fakeClient(
+    { choice: "low", confidence: 0.9 },
+    { probabilities: { candidate_0: 1 } },
+  );
+
+  const disabled = createWorkflowService({ getClient: () => client, enabled: false });
+  assert.equal(await disabled.rankContext("task", [{ id: "a.ts" }]), undefined);
+
+  const unconfigured = createWorkflowService({ getClient: () => undefined });
+  assert.equal(await unconfigured.rankContext("task", [{ id: "a.ts" }]), undefined);
+
+  const empty = createWorkflowService({ getClient: () => client });
+  assert.equal(await empty.rankContext("task", []), undefined);
+
+  assert.equal(calls.noulCount, 0);
+});
+
 test("exposes per-decision thresholds and status with defaults", async () => {
   const service = createWorkflowService({ getClient: () => undefined });
   assert.equal(service.threshold("intent"), DEFAULT_ROUTING_THRESHOLD);
+  assert.equal(service.threshold("context"), DEFAULT_CONTEXT_THRESHOLD);
   assert.deepEqual(service.status(), { configured: false });
 
   const configured = createWorkflowService({

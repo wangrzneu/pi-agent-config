@@ -27,6 +27,14 @@ The hint is a **behavior preference** (README design principle #2): it never
 blocks tools and never widens permissions. The intent→workflow mapping lives in
 `extensions/system-one/routing.ts` and is pure and deterministic.
 
+| Intent | Prompt | Suggests planning |
+|---|---|---|
+| `design` | `prompts/architecture.md` | yes |
+| `plan` | — | yes |
+| `review` | `prompts/review-first.md` | no |
+| `fix` | `prompts/debugging.md` | no |
+| `implement` / `test` / `explore` | — | no |
+
 ### Shared decision with work-status
 
 The decision is resolved by a process-wide service
@@ -77,13 +85,26 @@ most once per user turn** (a genuine user prompt resets the budget; the
 extension-triggered pass does not emit `before_agent_start`, so it cannot loop).
 Turns that changed no files are skipped entirely.
 
-| Intent | Prompt | Suggests planning |
-|---|---|---|
-| `design` | `prompts/architecture.md` | yes |
-| `plan` | — | yes |
-| `review` | `prompts/review-first.md` | no |
-| `fix` | `prompts/debugging.md` | no |
-| `implement` / `test` / `explore` | — | no |
+### Context selection
+
+A `context_select` tool (registered only when System One is configured) ranks a
+candidate list by relevance to a task. It uses the **`noul`** primitive to ask one
+yes/no question per candidate in a single request — the "many independent,
+decomposed questions" pattern — then applies a deterministic threshold + top-K
+policy (`extensions/system-one/context.ts`).
+
+```
+context_select(task: "add login", candidates: ["src/auth.ts", "src/ui/button.tsx", ...])
+-> Most relevant candidates (probability):
+   - src/auth.ts (0.94)
+   - src/session.ts (0.81)
+```
+
+- Candidates are deduped and capped at `MAX_CONTEXT_CANDIDATES = 200` per request.
+- The threshold defaults to `PI_SYSTEM_ONE_MIN_CONFIDENCE_CONTEXT` (0.5);
+  `max_results` defaults to 25.
+- It only **ranks** — it never reads files or changes what the agent may access.
+  The agent still decides what to read.
 
 ## Enabling
 
@@ -99,6 +120,7 @@ Disabled by default. Set `TYPESAFE_API_KEY` (the SDK's own env var):
 | `PI_SYSTEM_ONE_MIN_CONFIDENCE_INTENT` | `0.5` | Workflow-intent threshold. |
 | `PI_SYSTEM_ONE_MIN_CONFIDENCE_RISK` | `0.6` | Change-risk threshold. |
 | `PI_SYSTEM_ONE_MIN_CONFIDENCE_COMPLETION` | `0.6` | Completion threshold. |
+| `PI_SYSTEM_ONE_MIN_CONFIDENCE_CONTEXT` | `0.5` | Context-selection relevance threshold. |
 
 Configuration is re-resolved on each `session_start`, so env changes take effect
 on the next session without a full restart. `/system-one` toggles and inspects
@@ -139,9 +161,16 @@ authorization: Bearer <TYPESAFE_API_KEY>
   } }
 ```
 
-The API supports three question primitives — `noul` (yes/no), `choice`, and
-`score` (rubric). Only `choice` is wired here, because it is the primitive that
-returns a calibrated `confidence`.
+The API supports three primitives — `noul` (yes/no), `choice`, and `score`
+(rubric). Two are wired: `choice` (a calibrated `confidence`) for the three
+decisions, and `noul` (a probability) for context ranking, which asks one question
+per candidate in a single request. `score` is unused.
+
+```json
+{ "answers": {
+    "candidate_0": { "type": "noul", "noul": 0.94 },
+    "candidate_1": { "type": "noul", "noul": 0.12 } } }
+```
 
 ```json
 { "model": "jev-latest",
@@ -247,6 +276,7 @@ blocks or degrades an agent turn. To disable the feature, run
   permissions.
 - **Never** let it write session state, memory evidence, or files. It only
   ranks/chooses; provenance stays deterministic.
+- `context_select` only *ranks* candidates; it never reads files or widens access.
 - `work-status` reuses this same decision (`extensions/system-one/service.ts`),
   so a prompt is decided once per session instead of once per consumer. When
 disabled or unconfigured, `work-status` falls back to its own model classifier.

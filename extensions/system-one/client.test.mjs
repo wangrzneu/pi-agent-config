@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildDecisionBody,
+  buildNoulBody,
   createHttpSystemOneClient,
   createSystemOneClient,
   parseDecisionResponse,
+  parseNoulResponse,
 } from "./client.ts";
 import { readSystemOneConfig, SYSTEM_ONE_DEFAULTS, systemOneUrl } from "./config.ts";
 
@@ -80,6 +82,59 @@ test("parses the answers map and validates the choice", () => {
   );
 });
 
+test("builds a multi-noul request body", () => {
+  const body = buildNoulBody(
+    {
+      questions: [
+        { id: "q0", instructions: "is a?" },
+        { id: "q1", instructions: "is b?", criteria: { true: "yes", false: "no" } },
+      ],
+      state: "task",
+      maxStateCharacters: 2,
+    },
+    "jev-latest",
+  );
+  assert.equal(body.state, "ta");
+  assert.deepEqual(body.questions.q0, { type: "noul", instructions: "is a?" });
+  assert.deepEqual(body.questions.q1, {
+    type: "noul",
+    instructions: "is b?",
+    criteria: { true: "yes", false: "no" },
+  });
+});
+
+test("parses noul answers and omits invalid ones", () => {
+  const payload = {
+    answers: {
+      q0: { type: "noul", noul: 0.9 },
+      q1: { type: "noul", noul: 2 },
+      q2: { type: "choice", choice: "x", confidence: 1 },
+    },
+  };
+  assert.deepEqual(parseNoulResponse(payload, ["q0", "q1", "q2"]), {
+    probabilities: { q0: 0.9 },
+  });
+  assert.equal(parseNoulResponse({ answers: {} }, ["q0"]), undefined);
+  assert.equal(parseNoulResponse(null, ["q0"]), undefined);
+});
+
+test("assessNoul posts noul questions and parses the answers", async () => {
+  const config = readSystemOneConfig({ TYPESAFE_API_KEY: "k" });
+  const client = createHttpSystemOneClient(config, async (_url, init) => {
+    assert.equal(JSON.parse(init.body).questions.q0.type, "noul");
+    return new Response(
+      JSON.stringify({ answers: { q0: { type: "noul", noul: 0.77 } } }),
+      { status: 200 },
+    );
+  });
+  assert.deepEqual(
+    await client.assessNoul({
+      questions: [{ id: "q0", instructions: "is a?" }],
+      state: "task",
+    }),
+    { probabilities: { q0: 0.77 } },
+  );
+});
 test("rejects off-schema or malformed answers", () => {
   const withAnswer = (answer) => ({ answers: { [QUESTION.id]: answer } });
   assert.equal(parseDecisionResponse(withAnswer({ type: "choice", choice: "refactor", confidence: 1 }), QUESTION), undefined);
@@ -150,7 +205,12 @@ test("config uses SDK env names, defaults, and per-decision thresholds", () => {
   assert.equal(custom.baseUrl, "https://example.test");
   assert.equal(custom.model, "custom-model");
   assert.equal(custom.timeoutMs, 30_000);
-  assert.deepEqual(custom.thresholds, { intent: 0.7, risk: 0.9, completion: 0.7 });
+  assert.deepEqual(custom.thresholds, {
+    intent: 0.7,
+    risk: 0.9,
+    completion: 0.7,
+    context: 0.7,
+  });
 
   const clamped = readSystemOneConfig({
     TYPESAFE_API_KEY: "k",

@@ -12,6 +12,13 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import {
+  formatContextResult,
+  MAX_CONTEXT_CANDIDATES,
+  selectRelevant,
+  type ContextCandidate,
+} from "./context.ts";
 import {
   renderWorkflowHint,
   resolveWorkflowRoute,
@@ -38,8 +45,12 @@ const RISK_TOOL_NAMES = new Set(["edit", "write"]);
 
 export default function systemOne(pi: ExtensionAPI) {
   // Re-resolve configuration at session start so env changes apply without a
-  // full process restart (matches the external-memory convention).
-  pi.on("session_start", () => configureWorkflowService());
+  // full process restart (matches the external-memory convention). The context
+  // tool is only offered once System One is configured.
+  pi.on("session_start", () => {
+    const service = configureWorkflowService();
+    if (service.status().configured) registerContextTool(pi, getWorkflowService);
+  });
   registerWorkflowRouting(pi, getWorkflowService);
   registerChangeRisk(pi, getWorkflowService);
   registerCompletionCheck(pi, getWorkflowService);
@@ -91,6 +102,7 @@ export function registerWorkflowRouting(
           intent: service.threshold("intent"),
           risk: service.threshold("risk"),
           completion: service.threshold("completion"),
+          context: service.threshold("context"),
         }),
         "info",
       );
@@ -159,9 +171,88 @@ function renderStatus(
   if (status.endpoint) lines.push(`Endpoint: ${status.endpoint}`);
   if (status.model) lines.push(`Model: ${status.model}`);
   lines.push(
-    `Thresholds: intent ${thresholds.intent.toFixed(2)} | risk ${thresholds.risk.toFixed(2)} | completion ${thresholds.completion.toFixed(2)}`,
+    `Thresholds: intent ${thresholds.intent.toFixed(2)} | risk ${thresholds.risk.toFixed(2)} | completion ${thresholds.completion.toFixed(2)} | context ${thresholds.context.toFixed(2)}`,
   );
   return lines.join("\n");
+}
+
+/**
+ * Offer a `context_select` tool that ranks candidate files by relevance to a
+ * task. Only registered when System One is configured. The tool ranks; it does
+ * not read files or change access.
+ */
+export function registerContextTool(
+  pi: ExtensionAPI,
+  getService: () => WorkflowService,
+): void {
+  pi.registerTool({
+    name: "context_select",
+    label: "Select relevant context",
+    description:
+      "Rank candidate files by relevance to a task using System One, so you can read the most relevant ones first. Use it after a broad find/grep returns more candidates than you want to read.",
+    promptSnippet: "Rank candidate files by relevance to the current task",
+    parameters: Type.Object({
+      task: Type.String({ description: "What you are trying to accomplish" }),
+      candidates: Type.Array(Type.String(), {
+        description: "Candidate file paths to rank",
+        maxItems: MAX_CONTEXT_CANDIDATES,
+      }),
+      max_results: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+      min_probability: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const candidates = dedupeCandidates(params.candidates);
+      if (candidates.length === 0) {
+        return {
+          content: [{ type: "text", text: "No candidate paths were provided." }],
+          details: { selected: 0, total: 0 },
+        };
+      }
+
+      const service = getService();
+      const probabilities = await service.rankContext(
+        params.task,
+        candidates,
+        signal,
+      );
+      if (!probabilities) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "System One is unavailable; rank the candidates manually.",
+            },
+          ],
+          details: { enabled: false },
+        };
+      }
+
+      const selection = selectRelevant(candidates, probabilities, {
+        threshold: params.min_probability ?? service.threshold("context"),
+        maxSelected: params.max_results,
+      });
+      return {
+        content: [{ type: "text", text: formatContextResult(selection) }],
+        details: {
+          selected: selection.selected.length,
+          total: candidates.length,
+        },
+      };
+    },
+  });
+}
+
+function dedupeCandidates(paths: readonly string[]): ContextCandidate[] {
+  const seen = new Set<string>();
+  const candidates: ContextCandidate[] = [];
+  for (const raw of paths) {
+    const id = raw.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    candidates.push({ id });
+    if (candidates.length >= MAX_CONTEXT_CANDIDATES) break;
+  }
+  return candidates;
 }
 
 /**

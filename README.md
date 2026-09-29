@@ -29,7 +29,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | 🛡️ **Sandbox** | Fail-closed OS sandbox for local shell commands |
 | 🧠 **External memory** | Opt-in synced-folder memory captured at compaction with two-stage recall |
 | 🧭 **Workflow skill** | Concise default working guidelines |
-| 🛰️ **Workflow routing** | Opt-in [System One](https://typesafe.ai/blog/introducing-system-one-models-and-jev) decisions that route to the right workflow prompt, flag risky edits, and run a pre-completion self-check |
+| 🛰️ **Workflow routing** | Opt-in [System One](https://typesafe.ai/blog/introducing-system-one-models-and-jev) decisions that route to the right workflow prompt, flag risky edits, run a pre-completion self-check, and rank candidate files by relevance |
 | 🧩 **Prompts** | On-demand review / debugging / architecture prompts |
 | 📚 **Docs** | Reference docs for exploration, external projects, and security |
 
@@ -271,7 +271,8 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
   reuses that same decision, so a prompt is decided once per session. Each proposed edit is also triaged
   for change risk, and a risky (or uncertain) change injects a hidden review hint before the next model
   call. After a turn that changed files, a completion self-check can start one extra verification pass
-  (at most once per user prompt). `/system-one on|off` toggles all of it at runtime; configuration is
+  (at most once per user prompt). A `context_select` tool ranks candidate files by relevance on demand.
+  `/system-one on|off` toggles all of it at runtime; configuration is
   re-resolved at session start.
 - Each `/btw` question uses a separate model loop with a small output and tool-call budget. Read-only
   tool results stay ephemeral and the exchange is not stored in the session.

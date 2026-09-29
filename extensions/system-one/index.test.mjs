@@ -4,6 +4,7 @@ import {
   HINT_CUSTOM_TYPE,
   registerChangeRisk,
   registerCompletionCheck,
+  registerContextTool,
   registerWorkflowRouting,
   RISK_CUSTOM_TYPE,
   SELF_CHECK_CUSTOM_TYPE,
@@ -11,14 +12,18 @@ import {
 } from "./index.ts";
 import { createWorkflowService } from "./service.ts";
 
-function fakeClient(result) {
-  const calls = { count: 0 };
+function fakeClient(result, noulResult) {
+  const calls = { count: 0, noulCount: 0 };
   return {
     calls,
     client: {
       async decide() {
         calls.count++;
         return result;
+      },
+      async assessNoul() {
+        calls.noulCount++;
+        return noulResult;
       },
     },
   };
@@ -142,6 +147,7 @@ test("default export wires session_start and the system-one command", async () =
     registerCommand(name) {
       commands.add(name);
     },
+    registerTool() {},
   });
 
   assert.ok(events.has("session_start"));
@@ -150,6 +156,56 @@ test("default export wires session_start and the system-one command", async () =
   assert.ok(events.has("context"));
   assert.ok(events.has("agent_end"));
   assert.ok(commands.has("system-one"));
+});
+
+// --- context selection -----------------------------------------------------
+
+function createToolHarness(service) {
+  let tool;
+  registerContextTool({ registerTool(definition) { tool = definition; } }, () => service);
+  return tool;
+}
+
+test("context_select ranks candidates and selects above threshold", async () => {
+  const { client } = fakeClient(
+    { choice: "low", confidence: 0.9 },
+    { probabilities: { candidate_0: 0.95, candidate_1: 0.2, candidate_2: 0.8 } },
+  );
+  const tool = createToolHarness(createWorkflowService({ getClient: () => client }));
+  assert.equal(tool.name, "context_select");
+
+  const result = await tool.execute(
+    "call-1",
+    { task: "add login", candidates: ["a.ts", "b.ts", "c.ts"] },
+    undefined,
+  );
+  assert.match(result.content[0].text, /a\.ts \(0\.95\)/);
+  assert.match(result.content[0].text, /c\.ts \(0\.80\)/);
+  assert.doesNotMatch(result.content[0].text, /b\.ts/);
+  assert.deepEqual(result.details, { selected: 2, total: 3 });
+});
+
+test("context_select fails open when unavailable and rejects empty input", async () => {
+  const unavailable = createToolHarness(
+    createWorkflowService({ getClient: () => undefined }),
+  );
+  const fallback = await unavailable.execute(
+    "call-1",
+    { task: "t", candidates: ["a.ts"] },
+    undefined,
+  );
+  assert.match(fallback.content[0].text, /unavailable/);
+  assert.equal(fallback.details.enabled, false);
+
+  const { client, calls } = fakeClient({ choice: "low", confidence: 0.9 }, { probabilities: {} });
+  const tool = createToolHarness(createWorkflowService({ getClient: () => client }));
+  const empty = await tool.execute(
+    "call-2",
+    { task: "t", candidates: ["  ", ""] },
+    undefined,
+  );
+  assert.match(empty.content[0].text, /No candidate paths/);
+  assert.equal(calls.noulCount, 0);
 });
 
 // --- change-risk triage ----------------------------------------------------

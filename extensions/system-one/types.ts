@@ -3,11 +3,13 @@
  *
  * These mirror the real `typesafe_sdk` / `POST /v1/systemone` contract:
  * a request carries a `state` document plus named `questions`, and the response
- * carries `answers` keyed by the same names. Only the `choice` question primitive
- * is wired here, because it is the one that returns a calibrated `confidence`.
+ * carries `answers` keyed by the same names. Two primitives are wired:
  *
- * The client is intentionally narrow: one choice question per request. See
- * `docs/system-one.md`.
+ * - `choice` (one decision) — the one that returns a calibrated `confidence`.
+ * - `noul` (yes/no) — many independent questions in one request, used to rank a
+ *   candidate set by relevance.
+ *
+ * See `docs/system-one.md`.
  */
 
 export interface ChoiceQuestion {
@@ -39,17 +41,47 @@ export interface DecisionResult {
   probabilities?: Record<string, number>;
 }
 
+export interface NoulQuestion {
+  /** Question id; echoed as the key under `answers`. */
+  id: string;
+  /** The yes/no question or assertion to evaluate. */
+  instructions: string;
+  /** Optional descriptions of the yes and no outcomes. */
+  criteria?: { true?: string; false?: string };
+}
+
+export interface NoulRequest {
+  questions: readonly NoulQuestion[];
+  state: string;
+  maxStateCharacters?: number;
+}
+
+export interface NoulAssessment {
+  /** Question id → probability that the answer is "true", in [0, 1]. */
+  probabilities: Record<string, number>;
+}
+
+/** The decisions the extension makes, each with its own threshold. */
+export type DecisionKind = "intent" | "risk" | "completion" | "context";
+
 export interface SystemOneClient {
   /**
-   * Resolve one decision. Returns `undefined` when the model is unavailable,
-   * times out, or answers off-schema — callers must treat `undefined` as
-   * "do nothing" (fail-open) rather than guessing.
+   * Resolve one choice decision. Returns `undefined` when the model is
+   * unavailable, times out, or answers off-schema — callers must treat
+   * `undefined` as "do nothing" (fail-open) rather than guessing.
    */
   decide(
     request: DecisionRequest,
     signal?: AbortSignal,
   ): Promise<DecisionResult | undefined>;
-}
 
-/** The three decisions the extension makes, each with its own threshold. */
-export type DecisionKind = "intent" | "risk" | "completion";
+  /**
+   * Resolve many yes/no questions in one request. Returns `undefined` on any
+   * transport/parse failure; individual unanswerable questions are omitted from
+   * `probabilities` rather than failing the whole assessment.
+   */
+  assessNoul(
+    request: NoulRequest,
+    signal?: AbortSignal,
+  ): Promise<NoulAssessment | undefined>;
+}

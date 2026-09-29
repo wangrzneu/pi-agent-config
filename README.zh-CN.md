@@ -29,7 +29,7 @@
 | 🛡️ **沙箱** | 对本地 shell 命令实施 fail-closed 的操作系统级沙箱 |
 | 🧠 **外部记忆** | 可选的项目级同步目录记忆，压缩时捕获、两阶段召回 |
 | 🧭 **工作流 skill** | 精简的默认工作规范 |
-| 🛰️ **工作流路由** | 可选的 [System One](https://typesafe.ai/blog/introducing-system-one-models-and-jev) 决策：路由到正确的工作流提示词、标记高风险改动，并在完成前做自检 |
+| 🛰️ **工作流路由** | 可选的 [System One](https://typesafe.ai/blog/introducing-system-one-models-and-jev) 决策：路由到正确的工作流提示词、标记高风险改动、在完成前做自检，并按相关性排序候选文件 |
 | 🧩 **提示词** | 按需使用的 review / debugging / architecture 提示词 |
 | 📚 **文档** | 代码探索、外部项目与安全边界参考文档 |
 
@@ -256,7 +256,8 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
   System One 决策请求，且只注入一条隐藏的工作流提示；工作状态复用同一决策，因此每个会话中
   一个提示词只判定一次。每次 edit/write 还会做变更风险分级，高风险（或不确定）的改动会在下次
   模型调用前注入一条隐藏的复查提示。在有过文件改动的回合结束后，完成自检可能再触发一次验证
-  流程（每个用户提示最多一次）。`/system-one on|off` 可在运行时同时开关这些功能；配置会在
+  流程（每个用户提示最多一次）。另外提供 `context_select` 工具，按相关性排序候选文件。
+  `/system-one on|off` 可在运行时同时开关这些功能；配置会在
   每次会话开始时重新解析。
 - 每个 `/btw` 问题会运行一个带有较小输出与工具调用预算的独立模型循环；只读工具结果是临时的，
   问答不会写入会话。

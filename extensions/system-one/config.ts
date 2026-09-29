@@ -7,6 +7,7 @@
  */
 
 import { DEFAULT_COMPLETION_THRESHOLD } from "./completion.ts";
+import { DEFAULT_CONTEXT_THRESHOLD } from "./context.ts";
 import { DEFAULT_RISK_THRESHOLD } from "./risk.ts";
 import { DEFAULT_ROUTING_THRESHOLD } from "./routing.ts";
 import type { DecisionKind } from "./types.ts";
@@ -34,6 +35,7 @@ export const SYSTEM_ONE_DEFAULTS = {
     intent: DEFAULT_ROUTING_THRESHOLD,
     risk: DEFAULT_RISK_THRESHOLD,
     completion: DEFAULT_COMPLETION_THRESHOLD,
+    context: DEFAULT_CONTEXT_THRESHOLD,
   } satisfies SystemOneThresholds,
 } as const;
 
@@ -82,6 +84,10 @@ function resolveThresholds(
     completion: parseThreshold(
       env.PI_SYSTEM_ONE_MIN_CONFIDENCE_COMPLETION,
       parseThreshold(shared, defaults.completion),
+    ),
+    context: parseThreshold(
+      env.PI_SYSTEM_ONE_MIN_CONFIDENCE_CONTEXT,
+      parseThreshold(shared, defaults.context),
     ),
   };
 }
