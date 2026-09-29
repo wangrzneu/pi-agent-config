@@ -29,6 +29,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | 🛡️ **Sandbox** | Fail-closed OS sandbox for local shell commands |
 | 🧠 **External memory** | Opt-in synced-folder memory captured at compaction with two-stage recall |
 | 🧭 **Workflow skill** | Concise default working guidelines |
+| 🛰️ **Workflow routing** | Opt-in [System One](https://typesafe.ai/blog/introducing-system-one-models-and-jev) decisions that route to the right workflow prompt, flag risky edits, and run a pre-completion self-check |
 | 🧩 **Prompts** | On-demand review / debugging / architecture prompts |
 | 📚 **Docs** | Reference docs for exploration, external projects, and security |
 
@@ -43,6 +44,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | `extensions/ssh-tools/` | Dynamically discovered SSH execution, transfer, and remote job tools |
 | `extensions/sandbox/` | Fail-closed OS sandboxing for local shell commands |
 | `extensions/external-memory/` | Opt-in synced-folder memory captured at compaction with two-stage recall |
+| `extensions/system-one/` | Opt-in System One decision client and workflow routing |
 | `skills/pi-workflow/` | Concise default working guidelines |
 | `prompts/` | On-demand prompts for review, debugging, and architecture tasks |
 | `docs/` | Reference documentation for code exploration, external projects, and security boundaries |
@@ -70,6 +72,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | `docs/sandbox-credential-clis.md` | Running credential-needing CLIs (aws/gh/gcloud) in the sandbox: credential masking + TLS termination + SigV4 re-signing |
 | `docs/exploration.md` | Code exploration guidance |
 | `docs/external-projects.md` | Working with external projects |
+| `docs/system-one.md` | System One decision client, wire contract, and workflow routing |
 
 ## 📋 Prerequisites
 
@@ -263,6 +266,13 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
   continuously enforce the read-only restrictions.
 - Work status uses one short, no-reasoning model request for each uncached task. It consumes a small
   number of tokens but does not add the result to the session context.
+- Workflow routing is inert unless `TYPESAFE_API_KEY` is set. When enabled, it makes one short
+  System One decision request per uncached prompt and injects only a hidden workflow hint; work status
+  reuses that same decision, so a prompt is decided once per session. Each proposed edit is also triaged
+  for change risk, and a risky (or uncertain) change injects a hidden review hint before the next model
+  call. After a turn that changed files, a completion self-check can start one extra verification pass
+  (at most once per user prompt). `/system-one on|off` toggles all of it at runtime; configuration is
+  re-resolved at session start.
 - Each `/btw` question uses a separate model loop with a small output and tool-call budget. Read-only
   tool results stay ephemeral and the exchange is not stored in the session.
 - The Markdown viewer, directory navigation, search, images, and Mermaid rendering are processed only

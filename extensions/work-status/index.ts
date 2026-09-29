@@ -1,4 +1,10 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import { isWorkflowIntent } from "../system-one/routing.ts";
+import { getWorkflowService } from "../system-one/service.ts";
+import type { DecisionResult } from "../system-one/types.ts";
 import {
   classifyWorkWithModel,
   type WorkClassification,
@@ -7,6 +13,7 @@ import { isPlanModeActive } from "./plan-mode-state.ts";
 import {
   WORK_TYPE_LABELS,
   describeToolActivity,
+  summarizeWork,
   type WorkActivity,
   type WorkType,
 } from "./work-status.ts";
@@ -27,10 +34,42 @@ interface CurrentWork {
   summary: string;
 }
 
-type ClassifyWork = typeof classifyWorkWithModel;
+type ClassifyWork = (
+  prompt: string,
+  ctx: ExtensionContext,
+) => Promise<WorkClassification | undefined>;
 
 export default function workStatus(pi: ExtensionAPI) {
-  registerWorkStatus(pi, classifyWorkWithModel);
+  registerWorkStatus(pi, classifyWorkPreferringSystemOne);
+}
+
+export interface WorkClassifierDeps {
+  decideIntent: (
+    prompt: string,
+    signal?: AbortSignal,
+  ) => Promise<DecisionResult | undefined>;
+  fallback: ClassifyWork;
+}
+
+/**
+ * Prefer the shared System One decision for the work type; fall back to the
+ * model classifier when System One is off or unavailable. The summary is
+ * derived deterministically from the prompt because System One Models return
+ * structured values, not generated text.
+ */
+export async function classifyWorkPreferringSystemOne(
+  prompt: string,
+  ctx: ExtensionContext,
+  deps: WorkClassifierDeps = {
+    decideIntent: (text, signal) => getWorkflowService().decideIntent(text, signal),
+    fallback: classifyWorkWithModel,
+  },
+): Promise<WorkClassification | undefined> {
+  const decision = await deps.decideIntent(prompt, ctx.signal);
+  if (decision && isWorkflowIntent(decision.choice)) {
+    return { type: decision.choice, summary: summarizeWork(prompt) };
+  }
+  return deps.fallback(prompt, ctx);
 }
 
 export function registerWorkStatus(

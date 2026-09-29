@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { registerWorkStatus } from "./index.ts";
+import { registerWorkStatus, classifyWorkPreferringSystemOne } from "./index.ts";
 import {
   classifyWorkWithModel,
   parseClassification,
@@ -285,4 +285,43 @@ test("model classifier skips models that cannot disable reasoning", async () => 
 
   assert.equal(classification, undefined);
   assert.equal(called, false);
+});
+
+test("prefers the shared System One decision for the work type", async () => {
+  const classification = await classifyWorkPreferringSystemOne(
+    "修复登录 bug",
+    { signal: undefined },
+    {
+      decideIntent: async () => ({ choice: "fix", confidence: 0.9 }),
+      fallback: async () => ({ type: "implement", summary: "fallback" }),
+    },
+  );
+
+  assert.deepEqual(classification, { type: "fix", summary: "修复登录 bug" });
+});
+
+test("falls back to the model classifier when System One is unavailable", async () => {
+  const classification = await classifyWorkPreferringSystemOne(
+    "修复登录 bug",
+    { signal: undefined },
+    {
+      decideIntent: async () => undefined,
+      fallback: async () => ({ type: "implement", summary: "fallback" }),
+    },
+  );
+
+  assert.deepEqual(classification, { type: "implement", summary: "fallback" });
+});
+
+test("ignores an off-schema System One choice and falls back", async () => {
+  const classification = await classifyWorkPreferringSystemOne(
+    "task",
+    { signal: undefined },
+    {
+      decideIntent: async () => ({ choice: "refactor", confidence: 0.9 }),
+      fallback: async () => ({ type: "review", summary: "fallback" }),
+    },
+  );
+
+  assert.deepEqual(classification, { type: "review", summary: "fallback" });
 });
