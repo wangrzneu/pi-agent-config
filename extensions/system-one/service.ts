@@ -17,7 +17,7 @@ import { readSystemOneConfig, SYSTEM_ONE_DEFAULTS } from "./config.ts";
 import { MAX_STATE_CHARACTERS, WORKFLOW_QUESTION } from "./routing.ts";
 import { RISK_QUESTION } from "./risk.ts";
 import { COMPLETION_QUESTION } from "./completion.ts";
-import { buildContextQuestions, type ContextCandidate } from "./context.ts";
+import { buildContextRequest, MAX_CONTEXT_CHARACTERS, type ContextCandidate } from "./context.ts";
 import type { ChoiceQuestion, DecisionKind, DecisionResult, SystemOneClient } from "./types.ts";
 
 const CACHE_ENTRIES = 128;
@@ -125,11 +125,14 @@ export function createWorkflowService(
       const cached = contextCache.get(key);
       if (cached) return cached;
 
+      const request = buildContextRequest(trimmed, candidates);
+      if (request.questions.length === 0) return undefined;
+
       const assessment = await client.assessNoul(
         {
-          questions: buildContextQuestions(candidates),
-          state: trimmed,
-          maxStateCharacters: MAX_STATE_CHARACTERS,
+          questions: request.questions,
+          state: request.state,
+          maxStateCharacters: MAX_CONTEXT_CHARACTERS,
         },
         signal,
       );

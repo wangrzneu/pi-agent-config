@@ -132,6 +132,8 @@ test("ranks context with one noul request and caches it", async () => {
   assert.equal(calls.noulCount, 1);
   assert.equal(calls.noulRequests[0].questions.length, 2);
   assert.equal(calls.noulRequests[0].questions[0].id, "candidate_0");
+  assert.match(calls.noulRequests[0].state, /candidate_1: b\.ts/);
+  assert.doesNotMatch(calls.noulRequests[0].questions[0].instructions, /a\.ts/);
 
   await service.rankContext("add login", [{ id: "a.ts" }, { id: "b.ts" }]);
   assert.equal(calls.noulCount, 1);

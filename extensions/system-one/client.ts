@@ -56,22 +56,27 @@ function boundState(state: string, maxStateCharacters?: number): string {
     : state;
 }
 
+function baseBody(
+  state: string,
+  maxStateCharacters: number | undefined,
+  model: string,
+  questions: Record<string, WireQuestion>,
+): DecisionBody {
+  return { state: boundState(state, maxStateCharacters), model, questions };
+}
+
 /** Build a single-`choice` request body, truncating state to the declared bound. */
 export function buildDecisionBody(
   request: DecisionRequest,
   model: string,
 ): DecisionBody {
-  return {
-    state: boundState(request.state, request.maxStateCharacters),
-    model,
-    questions: {
-      [request.question.id]: {
-        type: "choice",
-        instructions: request.question.instructions,
-        criteria: { ...request.question.criteria },
-      },
+  return baseBody(request.state, request.maxStateCharacters, model, {
+    [request.question.id]: {
+      type: "choice",
+      instructions: request.question.instructions,
+      criteria: { ...request.question.criteria },
     },
-  };
+  });
 }
 
 /** Build a multi-`noul` request body, truncating state to the declared bound. */
@@ -87,11 +92,7 @@ export function buildNoulBody(
       ...(question.criteria ? { criteria: { ...question.criteria } } : {}),
     };
   }
-  return {
-    state: boundState(request.state, request.maxStateCharacters),
-    model,
-    questions,
-  };
+  return baseBody(request.state, request.maxStateCharacters, model, questions);
 }
 
 /** Validate a `choice` answer from a `/v1/systemone` payload. */
@@ -117,21 +118,24 @@ export function parseDecisionResponse(
 }
 
 /**
- * Validate `noul` answers from a `/v1/systemone` payload. Questions the model
- * did not answer cleanly are omitted; returns `undefined` when none are valid.
+ * Validate `noul` answers from a `/v1/systemone` payload. Requires **every**
+ * requested question to be answered cleanly: a partial result would silently
+ * score the missing candidates as 0 and drop relevant files.
  */
 export function parseNoulResponse(
   payload: unknown,
   questionIds: readonly string[],
 ): NoulAssessment | undefined {
+  if (questionIds.length === 0) return undefined;
   const probabilities: Record<string, number> = {};
   for (const id of questionIds) {
     const record = answerOf(payload, id);
-    if (!record || record.type !== "noul") continue;
-    const probability = record.noul;
-    if (isProbability(probability)) probabilities[id] = probability;
+    if (!record || record.type !== "noul" || !isProbability(record.noul)) {
+      return undefined;
+    }
+    probabilities[id] = record.noul;
   }
-  return Object.keys(probabilities).length > 0 ? { probabilities } : undefined;
+  return { probabilities };
 }
 
 function answerOf(

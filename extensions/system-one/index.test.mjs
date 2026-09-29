@@ -208,6 +208,24 @@ test("context_select fails open when unavailable and rejects empty input", async
   assert.equal(calls.noulCount, 0);
 });
 
+test("context_select distinguishes disabled from unavailable", async () => {
+  const { client, calls } = fakeClient(
+    { choice: "low", confidence: 0.9 },
+    { probabilities: { candidate_0: 0.9 } },
+  );
+  const disabled = createToolHarness(
+    createWorkflowService({ getClient: () => client, enabled: false }),
+  );
+  const result = await disabled.execute(
+    "call-1",
+    { task: "t", candidates: ["a.ts"] },
+    undefined,
+  );
+  assert.match(result.content[0].text, /disabled/);
+  assert.equal(result.details.enabled, false);
+  assert.equal(calls.noulCount, 0);
+});
+
 // --- change-risk triage ----------------------------------------------------
 
 function createRiskHarness(service) {

@@ -103,7 +103,7 @@ test("builds a multi-noul request body", () => {
   });
 });
 
-test("parses noul answers and omits invalid ones", () => {
+test("requires every noul answer to be valid", () => {
   const payload = {
     answers: {
       q0: { type: "noul", noul: 0.9 },
@@ -111,11 +111,16 @@ test("parses noul answers and omits invalid ones", () => {
       q2: { type: "choice", choice: "x", confidence: 1 },
     },
   };
-  assert.deepEqual(parseNoulResponse(payload, ["q0", "q1", "q2"]), {
+  // q1/q2 are invalid, so the whole assessment is rejected rather than silently
+  // scoring those candidates as 0.
+  assert.equal(parseNoulResponse(payload, ["q0", "q1"]), undefined);
+  assert.equal(parseNoulResponse(payload, ["q0", "q2"]), undefined);
+  assert.deepEqual(parseNoulResponse(payload, ["q0"]), {
     probabilities: { q0: 0.9 },
   });
   assert.equal(parseNoulResponse({ answers: {} }, ["q0"]), undefined);
   assert.equal(parseNoulResponse(null, ["q0"]), undefined);
+  assert.equal(parseNoulResponse({ answers: {} }, []), undefined);
 });
 
 test("assessNoul posts noul questions and parses the answers", async () => {

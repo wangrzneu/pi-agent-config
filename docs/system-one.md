@@ -100,7 +100,14 @@ context_select(task: "add login", candidates: ["src/auth.ts", "src/ui/button.tsx
    - src/session.ts (0.81)
 ```
 
-- Candidates are deduped and capped at `MAX_CONTEXT_CANDIDATES = 200` per request.
+- Candidates are deduped and capped at `MAX_CONTEXT_CANDIDATES = 200`. Each path is
+  sanitized and capped at `MAX_CANDIDATE_LENGTH = 200`, and any candidates that
+  would push the assembled state past `MAX_CONTEXT_CHARACTERS` are dropped.
+- Candidate paths go in `state` — the field the API treats as **untrusted** — while
+  each question refers to a candidate by index (`candidate_3`). A hostile filename
+  therefore cannot inject instructions into the question channel.
+- The model must answer **every** question; a partial response is rejected so
+  missing candidates are never silently scored as 0.
 - The threshold defaults to `PI_SYSTEM_ONE_MIN_CONFIDENCE_CONTEXT` (0.5);
   `max_results` defaults to 25.
 - It only **ranks** — it never reads files or changes what the agent may access.

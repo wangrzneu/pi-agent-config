@@ -210,6 +210,18 @@ export function registerContextTool(
       }
 
       const service = getService();
+      if (!service.isEnabled()) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "System One is disabled. Run /system-one on to enable it.",
+            },
+          ],
+          details: { enabled: false },
+        };
+      }
+
       const probabilities = await service.rankContext(
         params.task,
         candidates,
