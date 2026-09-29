@@ -189,9 +189,9 @@ variable. Override the accuracy target with `PI_SYSTEM_ONE_CALIBRATION_TARGET`
 
 | Decision | Accuracy | Confidence | Threshold |
 |---|---|---|---|
-| `intent` | 15/15 | one at 0.49, rest ≥ 0.8 | `0.5` |
-| `risk` | 12/15 | misses at 0.55 / 0.73 / 0.20 | `0.6` |
-| `completion` | 14/15 → 15/15 | misses at 0.27 | `0.6` |
+| `intent` | 15/15 | one at 0.50, rest ≥ 0.8 | `0.5` |
+| `risk` | 12/15 | misses at 0.54 / 0.73 / 0.19 | `0.6` |
+| `completion` | 15/15 | every bucket 100% | `0.6` |
 
 **intent** is clean; the one sub-0.6 answer (`refactor…`) is still correct.
 
@@ -202,12 +202,11 @@ fail-safe policy escalates them to a review pass anyway. Only the confident
 disagreement, and the fixture stays `high` deliberately.
 
 **completion**: tightening `criteria.verified` (from "there is evidence" to "a
-reported test/build/lint result") moved two cases from `unverified` to `verified`
-and lifted accuracy from 11/15 to 14/15. The last miss (`rename… grep shows no
-remaining references`) was a label fix: a search only shows the text is gone, not
-that the code still builds, so it is now labelled `unverified`. Because an
-`unverified` answer escalates at *any* confidence, the completion **threshold is
-not the lever — the definition of "verified" is**.
+reported test/build/lint result") plus relabelling the `grep shows no remaining
+references` case as `unverified` took completion from 11/15 to **15/15**. Every
+`verified` answer now reports a build/test result, and the grep case is correctly
+`unverified` (0.78). Because an `unverified` answer escalates at *any* confidence,
+the completion **threshold is not the lever — the definition of "verified" is**.
 
 #### Label conventions
 
