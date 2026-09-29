@@ -67,7 +67,7 @@
 | `docs/security.md` | 安全模型概览 |
 | `docs/exploration.md` | 代码探索指引 |
 | `docs/external-projects.md` | 处理外部项目 |
-| `docs/system-one.md` | System One 决策客户端、通信协议与工作流路由 |
+| `docs/system-one.md` | System One 决策：路由、变更风险、完成自检、上下文筛选与校准 |
 
 ## 📋 前置条件
 

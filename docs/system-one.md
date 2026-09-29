@@ -1,16 +1,22 @@
-# System One workflow routing
+# System One decisions
 
 Opt-in integration with **System One Models** — structured, calibrated decision
 models such as TypeSafe's [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev).
 
 The extension is a **decision sidecar**, not an agent model. It cannot generate
-text or code, so it never replaces Pi's coding model. It only resolves a small,
-predefined choice before the agent starts and injects a hidden hint that points
-at the matching on-demand prompt.
+text or code, so it never replaces Pi's coding model. It resolves small,
+predefined decisions and turns them into hidden hints or one extra step.
 
 ```
 unstructured state in  →  typed probabilistic decision out
 ```
+
+| Capability | Trigger | Primitive | Policy | Effect |
+|---|---|---|---|---|
+| Workflow routing | `before_agent_start` | `choice` | fail-open | hidden `[WORKFLOW]` hint → on-demand prompt |
+| Change-risk triage | after `edit` / `write` | `choice` | fail-safe | hidden `[RISK]` hint before the next call |
+| Completion self-check | `agent_end` (files changed) | `choice` | fail-safe | one extra verification pass (≤ once per user turn) |
+| Context selection | `context_select` tool | `noul` | threshold + top-K | ranks candidate files by relevance |
 
 ## What it does
 
@@ -212,9 +218,10 @@ all three decisions, then prints per-decision accuracy, **confidence buckets**
 confident decisions meet a target accuracy, and ready-to-paste exports:
 
 ```bash
-export PI_SYSTEM_ONE_MIN_CONFIDENCE_INTENT=0.6
-export PI_SYSTEM_ONE_MIN_CONFIDENCE_RISK=0.8
-export PI_SYSTEM_ONE_MIN_CONFIDENCE_COMPLETION=0.7
+# example output (this run adopted 0.5 / 0.6 / 0.6)
+export PI_SYSTEM_ONE_MIN_CONFIDENCE_INTENT=0.5
+export PI_SYSTEM_ONE_MIN_CONFIDENCE_RISK=0.6
+export PI_SYSTEM_ONE_MIN_CONFIDENCE_COMPLETION=0.6
 ```
 
 Thresholds are per decision, so each recommendation maps directly to one
@@ -286,7 +293,41 @@ blocks or degrades an agent turn. To disable the feature, run
 - `context_select` only *ranks* candidates; it never reads files or widens access.
 - `work-status` reuses this same decision (`extensions/system-one/service.ts`),
   so a prompt is decided once per session instead of once per consumer. When
-disabled or unconfigured, `work-status` falls back to its own model classifier.
+  disabled or unconfigured, `work-status` falls back to its own model classifier.
+
+## Known risks and limitations
+
+**Correctness / calibration**
+
+- **Context selection is uncalibrated.** `PI_SYSTEM_ONE_MIN_CONFIDENCE_CONTEXT`
+  (0.5) is a default; `npm run calibrate` covers only the three `choice`
+  decisions. Ranking quality needs task+candidate fixtures and a precision@k
+  metric.
+- **Fixtures are synthetic** (45 cases, one model). The risk fixture for a React
+  `^17 → ^18` bump is a known disagreement — labelled `high`, answered `medium`.
+- **Thresholds are model-specific.** Switching models (e.g. `jev-preview`)
+  requires re-running `npm run calibrate`.
+
+**Privacy / dependency**
+
+- **Data leaves the machine.** Task prompts, `edit` diffs, the last request plus
+  assistant replies (completion), and candidate paths are sent to
+  `TYPESAFE_BASE_URL`. Treat the endpoint as untrusted for sensitive code: point
+  `TYPESAFE_BASE_URL` at a self-hosted proxy, or run `/system-one off`.
+- **Early-access API.** The wire contract was recovered from the public
+  `typesafe-sdk` 0.7.1; an upstream change requires updating
+  `extensions/system-one/client.ts`.
+
+**Behavioural side effects**
+
+- **Completion can add one turn** (at most once per user prompt); a miscalibrated
+  model produces unnecessary passes.
+- **The `work-status` footer summary becomes a deterministic truncation** while
+  System One is on, because Jev returns no generated text.
+- **Context selection is a tool, not automatic**, so its benefit depends on the
+  agent calling it.
+- **Latency**: routing / risk / completion await a decision at their hook (cached
+  per prompt); context is on demand.
 
 ## Testing
 

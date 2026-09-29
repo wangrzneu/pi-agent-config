@@ -72,7 +72,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | `docs/sandbox-credential-clis.md` | Running credential-needing CLIs (aws/gh/gcloud) in the sandbox: credential masking + TLS termination + SigV4 re-signing |
 | `docs/exploration.md` | Code exploration guidance |
 | `docs/external-projects.md` | Working with external projects |
-| `docs/system-one.md` | System One decision client, wire contract, and workflow routing |
+| `docs/system-one.md` | System One decisions: routing, change risk, completion self-check, context selection, and calibration |
 
 ## 📋 Prerequisites
 
