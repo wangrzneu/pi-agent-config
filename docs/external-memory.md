@@ -1,6 +1,6 @@
 # Synced-folder external memory
 
-Status: proposed
+Status: implemented (opt-in, experimental)
 
 This document defines a lightweight external-memory extension for Pi. The first
 implementation stores immutable incremental files in a user-selected directory
@@ -302,6 +302,13 @@ hang Pi indefinitely.
 
 `/memory capture` performs the same incremental operation. It does not introduce a
 separate persistence path.
+
+### Optional incremental capture
+
+`PI_AGENT_MEMORY_INCREMENTAL=1` captures the unarchived tail after each
+`agent_settled` event. Capture remains idempotent, so a turn with no new entries
+creates no file. This is opt-in because it can create one small archive chunk per
+active turn; the default remains compaction, explicit capture, and shutdown.
 
 ## Branching and provenance
 

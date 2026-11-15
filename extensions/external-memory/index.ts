@@ -29,6 +29,7 @@ import { SyncedFolderStore } from "./synced-folder-store.ts";
 import type { MemoryEvidence, SessionSnapshot, SourceEntry } from "./types.ts";
 
 const SHUTDOWN_CAPTURE_DEADLINE_MS = 5_000;
+const MEMORY_TOOL_NAME = "memory_recall";
 
 interface MemoryRuntime {
   memory: ExternalMemory | undefined;
@@ -43,6 +44,18 @@ let memoryToolRegistered = false;
 /** Test seam: clear the once-per-module tool registration flag. */
 export function resetMemoryToolRegistration(): void {
   memoryToolRegistered = false;
+}
+
+/** Keep `memory_recall` in sync with the current project opt-in. */
+function setMemoryToolActive(pi: ExtensionAPI, active: boolean): void {
+  const current = pi.getActiveTools();
+  const next = active
+    ? [...new Set([...current, MEMORY_TOOL_NAME])]
+    : current.filter((name) => name !== MEMORY_TOOL_NAME);
+  if (next.length === current.length && next.every((name, index) => name === current[index])) {
+    return;
+  }
+  pi.setActiveTools(next);
 }
 
 export default function externalMemoryExtension(pi: ExtensionAPI): void {
@@ -65,6 +78,7 @@ export default function externalMemoryExtension(pi: ExtensionAPI): void {
       runtime.memory = undefined;
       runtime.root = undefined;
       runtime.enabled = false;
+      setMemoryToolActive(pi, false);
       if (!runtime.notifiedOnce && ctx.hasUI) {
         runtime.notifiedOnce = true;
         const hint = resolved.reason === "missing-root"
@@ -79,6 +93,7 @@ export default function externalMemoryExtension(pi: ExtensionAPI): void {
       runtime.memory = undefined;
       runtime.root = resolved.root;
       runtime.enabled = false;
+      setMemoryToolActive(pi, false);
       if (!runtime.notifiedOnce && ctx.hasUI) {
         runtime.notifiedOnce = true;
         ctx.ui.notify(
@@ -109,6 +124,7 @@ export default function externalMemoryExtension(pi: ExtensionAPI): void {
     // The recall tool becomes active as soon as memory is enabled (also after
     // an explicit /memory on); registration is idempotent per module load.
     registerMemoryTool();
+    setMemoryToolActive(pi, true);
 
     // Bounded write probe; local success is not a claim of cloud sync.
     try {
@@ -242,8 +258,18 @@ export default function externalMemoryExtension(pi: ExtensionAPI): void {
     if (memoryToolRegistered) return;
     memoryToolRegistered = true;
     pi.registerTool({
-      name: "memory_recall",
+      name: MEMORY_TOOL_NAME,
       label: "Recall external memory",
+      defaultActive: false,
+      namespace: {
+        name: "memory",
+        description: "External cross-session memory",
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        openWorldHint: false,
+      },
       description:
         "Recall evidence from earlier sessions stored in external memory. Use when the current task depends on decisions or facts from earlier sessions that are not present in the current context. Returns bounded excerpts with provenance.",
       promptSnippet: "Recall earlier-session evidence when a task depends on past decisions or facts",
@@ -260,7 +286,7 @@ export default function externalMemoryExtension(pi: ExtensionAPI): void {
         if (!memory || !runtime.enabled) {
           return {
             content: [{ type: "text", text: "External memory is not enabled for this project." }],
-            details: { enabled: false },
+            details: { enabled: false, resultCount: 0 },
           };
         }
         const results = await memory.recall({
@@ -282,7 +308,12 @@ export default function externalMemoryExtension(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     await initialize(ctx);
     // The recall tool is only active once memory is enabled for the project.
-    if (runtime.enabled) registerMemoryTool();
+    if (runtime.enabled) {
+      registerMemoryTool();
+      setMemoryToolActive(pi, true);
+    } else {
+      setMemoryToolActive(pi, false);
+    }
   });
 
   pi.on("session_before_compact", async (event, ctx) => {
@@ -299,6 +330,15 @@ export default function externalMemoryExtension(pi: ExtensionAPI): void {
     await safeCheckpoint(ctx, event);
   });
 
+  pi.on("agent_settled", async (_event, ctx) => {
+    // Opt-in: capture the unarchived tail after each settled turn so a crash
+    // does not lose the current session. Capture is idempotent, so turns with
+    // no new entries create no file.
+    if (process.env.PI_AGENT_MEMORY_INCREMENTAL !== "1") return;
+    if (!runtime.memory || !runtime.enabled) return;
+    await safeCapture(ctx, "explicit");
+  });
+
   pi.on("session_shutdown", async (event, ctx) => {
     if (!runtime.memory || !runtime.enabled) return;
     await safeCapture(ctx, "shutdown", { deadlineMs: SHUTDOWN_CAPTURE_DEADLINE_MS });
@@ -308,6 +348,12 @@ export default function externalMemoryExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("memory", {
     description: "Manage external memory: status, search <query>, capture, on, off",
+    getArgumentCompletions(prefix) {
+      const items = ["status", "search ", "capture", "on", "off"]
+        .filter((value) => value.startsWith(prefix))
+        .map((value) => ({ value, label: value.trim() }));
+      return items.length > 0 ? items : null;
+    },
     handler: async (args, ctx) => {
       const [action, ...rest] = args.trim().split(/\s+/);
       const query = rest.join(" ").trim();
@@ -350,7 +396,7 @@ export default function externalMemoryExtension(pi: ExtensionAPI): void {
           await enableMemory(ctx, runtime, initialize);
           return;
         case "off":
-          await disableMemory(ctx, runtime);
+          await disableMemory(pi, ctx, runtime);
           return;
         default:
           ctx.ui.notify(usageText(), "info");
@@ -463,10 +509,15 @@ async function enableMemory(
   ctx.ui.notify("External memory enabled for this project.", "info");
 }
 
-async function disableMemory(ctx: ExtensionContext, runtime: MemoryRuntime): Promise<void> {
+async function disableMemory(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  runtime: MemoryRuntime,
+): Promise<void> {
   await writeProjectConfig(ctx.cwd, { enabled: false });
   runtime.enabled = false;
   runtime.memory = undefined;
+  setMemoryToolActive(pi, false);
   ctx.ui.notify("External memory disabled for this project. Existing memory files were kept.", "info");
 }
 

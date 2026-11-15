@@ -13,23 +13,25 @@ import {
 import { createWorkflowService } from "./service.ts";
 
 function fakeClient(result, noulResult) {
-  const calls = { count: 0, noulCount: 0 };
+  const calls = { count: 0, requests: [], noulCount: 0, noulRequests: [] };
   return {
     calls,
     client: {
-      async decide() {
+      async decide(request) {
         calls.count++;
+        calls.requests.push(request);
         return result;
       },
-      async assessNoul() {
+      async assessNoul(request) {
         calls.noulCount++;
+        calls.noulRequests.push(request);
         return noulResult;
       },
     },
   };
 }
 
-function createHarness(service) {
+function createHarness(service, promptCommands = []) {
   const handlers = new Map();
   const commands = new Map();
   const notices = [];
@@ -40,6 +42,9 @@ function createHarness(service) {
     },
     registerCommand(name, command) {
       commands.set(name, command);
+    },
+    getCommands() {
+      return promptCommands;
     },
   };
   registerWorkflowRouting(pi, () => service);
@@ -88,6 +93,35 @@ test("before_agent_start injects a hidden message", async () => {
   assert.match(result.message.content, /Detected intent: design/);
 });
 
+test("keeps only the newest workflow hint in context", async () => {
+  const { client } = fakeClient({ choice: "fix", confidence: 0.9 });
+  const harness = createHarness(createWorkflowService({ getClient: () => client }));
+
+  const oldHint = { role: "custom", customType: HINT_CUSTOM_TYPE, content: "old" };
+  const user = { role: "user", content: "hi" };
+  const newHint = { role: "custom", customType: HINT_CUSTOM_TYPE, content: "new" };
+  const result = await harness.emit("context", {
+    messages: [oldHint, user, newHint],
+  });
+
+  assert.deepEqual(result.messages, [user, newHint]);
+});
+
+test("resolves the prompt path from Pi's command registry", async () => {
+  const { client } = fakeClient({ choice: "fix", confidence: 0.9 });
+  const harness = createHarness(createWorkflowService({ getClient: () => client }), [
+    {
+      name: "debugging",
+      source: "prompt",
+      sourceInfo: { path: "/pkg/prompts/debugging.md" },
+    },
+  ]);
+
+  const result = await harness.emit("before_agent_start", { prompt: "fix the bug" });
+  assert.match(result.message.content, /\/pkg\/prompts\/debugging\.md/);
+  assert.doesNotMatch(result.message.content, /Read prompts\/debugging\.md/);
+});
+
 test("before_agent_start does nothing without a prompt or configuration", async () => {
   const { client } = fakeClient({ choice: "fix", confidence: 0.9 });
   const enabled = createHarness(createWorkflowService({ getClient: () => client }));
@@ -101,7 +135,7 @@ test("/system-one off disables routing and on re-enables it", async () => {
   const { client, calls } = fakeClient({ choice: "fix", confidence: 0.9 });
   const service = createWorkflowService({
     getClient: () => client,
-    getStatus: () => ({ configured: true, endpoint: "https://example.test", model: "jev" }),
+    getStatus: () => ({ configured: true, provider: "typesafe", model: "jev" }),
   });
   const harness = createHarness(service);
 
@@ -122,7 +156,7 @@ test("/system-one status reports configuration without leaking secrets", async (
     getClient: () => undefined,
     getStatus: () => ({
       configured: true,
-      endpoint: "https://example.test/decide",
+      provider: "typesafe",
       model: "jev",
     }),
   });
@@ -130,9 +164,9 @@ test("/system-one status reports configuration without leaking secrets", async (
 
   await harness.command("system-one", "");
   const status = harness.notices.at(-1);
-  assert.match(status, /routing: on/);
+  assert.match(status, /decisions: on/);
   assert.match(status, /Configured: yes/);
-  assert.match(status, /Endpoint: https:\/\/example\.test\/decide/);
+  assert.match(status, /Provider: typesafe/);
   assert.match(status, /Model: jev/);
 });
 
@@ -154,7 +188,7 @@ test("default export wires session_start and the system-one command", async () =
   assert.ok(events.has("before_agent_start"));
   assert.ok(events.has("tool_call"));
   assert.ok(events.has("context"));
-  assert.ok(events.has("agent_end"));
+  assert.ok(events.has("agent_before_settle"));
   assert.ok(commands.has("system-one"));
 });
 
@@ -182,7 +216,7 @@ test("context_select ranks candidates and selects above threshold", async () => 
   assert.match(result.content[0].text, /a\.ts \(0\.95\)/);
   assert.match(result.content[0].text, /c\.ts \(0\.80\)/);
   assert.doesNotMatch(result.content[0].text, /b\.ts/);
-  assert.deepEqual(result.details, { selected: 2, total: 3 });
+  assert.deepEqual(result.details, { enabled: true, selected: 2, total: 3 });
 });
 
 test("context_select fails open when unavailable and rejects empty input", async () => {
@@ -195,7 +229,7 @@ test("context_select fails open when unavailable and rejects empty input", async
     undefined,
   );
   assert.match(fallback.content[0].text, /unavailable/);
-  assert.equal(fallback.details.enabled, false);
+  assert.deepEqual(fallback.details, { enabled: false, selected: 0, total: 1 });
 
   const { client, calls } = fakeClient({ choice: "low", confidence: 0.9 }, { probabilities: {} });
   const tool = createToolHarness(createWorkflowService({ getClient: () => client }));
@@ -205,6 +239,7 @@ test("context_select fails open when unavailable and rejects empty input", async
     undefined,
   );
   assert.match(empty.content[0].text, /No candidate paths/);
+  assert.deepEqual(empty.details, { enabled: true, selected: 0, total: 0 });
   assert.equal(calls.noulCount, 0);
 });
 
@@ -222,7 +257,7 @@ test("context_select distinguishes disabled from unavailable", async () => {
     undefined,
   );
   assert.match(result.content[0].text, /disabled/);
-  assert.equal(result.details.enabled, false);
+  assert.deepEqual(result.details, { enabled: false, selected: 0, total: 1 });
   assert.equal(calls.noulCount, 0);
 });
 
@@ -294,6 +329,26 @@ test("escalates an uncertain assessment and assesses each change once", async ()
   assert.equal(calls.count, 1);
 });
 
+test("batches parallel edits into one risk assessment", async () => {
+  const { client, calls } = fakeClient({ choice: "high", confidence: 0.9 });
+  const harness = createRiskHarness(createWorkflowService({ getClient: () => client }));
+
+  await harness.emit("tool_call", {
+    toolName: "write",
+    input: { path: "a.ts", content: "x" },
+  });
+  await harness.emit("tool_call", {
+    toolName: "edit",
+    input: { path: "b.ts", edits: [{ oldText: "a", newText: "b" }] },
+  });
+  const result = await harness.emit("context", { messages: [] });
+
+  assert.equal(calls.count, 1);
+  assert.match(calls.requests[0].state, /path: a\.ts/);
+  assert.match(calls.requests[0].state, /path: b\.ts/);
+  assert.match(result.messages.at(-1).content, /high risk/);
+});
+
 test("change risk is inert when System One is disabled", async () => {
   const { client, calls } = fakeClient({ choice: "high", confidence: 0.9 });
   const harness = createRiskHarness(
@@ -312,20 +367,15 @@ test("change risk is inert when System One is disabled", async () => {
 
 function createCompletionHarness(service) {
   const handlers = new Map();
-  const sent = [];
   const pi = {
     on(name, handler) {
       if (!handlers.has(name)) handlers.set(name, []);
       handlers.get(name).push(handler);
     },
-    async sendMessage(message, options) {
-      sent.push({ message, options });
-    },
   };
-  registerCompletionCheck(pi, () => service, { schedule: (task) => task() });
+  registerCompletionCheck(pi, () => service);
   const ctx = { signal: undefined };
   return {
-    sent,
     emit(name, event = {}) {
       const list = handlers.get(name) ?? [];
       return Promise.all(list.map((handler) => handler(event, ctx)));
@@ -333,11 +383,17 @@ function createCompletionHarness(service) {
   };
 }
 
-const FINISHED_TURN = {
-  messages: [
-    { role: "user", content: "add a login route" },
-    { role: "assistant", content: "done" },
-  ],
+const FINISHED_BOUNDARY = {
+  entries: [],
+  continue: false,
+  outcome: "completed",
+  context: {
+    canContinue: true,
+    llmMessages: [
+      { role: "user", content: "add a login route" },
+      { role: "assistant", content: [{ type: "text", text: "done" }] },
+    ],
+  },
 };
 
 test("starts one verification pass when the turn looks incomplete", async () => {
@@ -345,13 +401,14 @@ test("starts one verification pass when the turn looks incomplete", async () => 
   const harness = createCompletionHarness(createWorkflowService({ getClient: () => client }));
 
   await harness.emit("tool_call", { toolName: "edit", input: { path: "a.ts" } });
-  await harness.emit("agent_end", FINISHED_TURN);
+  const results = await harness.emit("agent_before_settle", FINISHED_BOUNDARY);
 
-  assert.equal(harness.sent.length, 1);
-  assert.equal(harness.sent[0].message.customType, SELF_CHECK_CUSTOM_TYPE);
-  assert.equal(harness.sent[0].message.display, false);
-  assert.deepEqual(harness.sent[0].options, { triggerTurn: true });
-  assert.match(harness.sent[0].message.content, /does not look fully addressed/);
+  assert.equal(results.length, 1);
+  const boundary = results[0];
+  assert.equal(boundary.continue, true);
+  assert.equal(boundary.entries.at(-1).customType, SELF_CHECK_CUSTOM_TYPE);
+  assert.equal(boundary.entries.at(-1).display, false);
+  assert.match(boundary.entries.at(-1).content, /does not look fully addressed/);
 });
 
 test("a verified turn stays silent", async () => {
@@ -359,9 +416,8 @@ test("a verified turn stays silent", async () => {
   const harness = createCompletionHarness(createWorkflowService({ getClient: () => client }));
 
   await harness.emit("tool_call", { toolName: "write", input: { path: "a.ts" } });
-  await harness.emit("agent_end", FINISHED_TURN);
-
-  assert.equal(harness.sent.length, 0);
+  const results = await harness.emit("agent_before_settle", FINISHED_BOUNDARY);
+  assert.equal(results[0], undefined);
 });
 
 test("an uncertain completion escalates (fail-safe)", async () => {
@@ -369,19 +425,30 @@ test("an uncertain completion escalates (fail-safe)", async () => {
   const harness = createCompletionHarness(createWorkflowService({ getClient: () => client }));
 
   await harness.emit("tool_call", { toolName: "write", input: { path: "a.ts" } });
-  await harness.emit("agent_end", FINISHED_TURN);
-
-  assert.equal(harness.sent.length, 1);
-  assert.match(harness.sent[0].message.content, /could not be confirmed/);
+  const results = await harness.emit("agent_before_settle", FINISHED_BOUNDARY);
+  assert.match(results[0].entries.at(-1).content, /could not be confirmed/);
 });
 
 test("does not assess turns that changed no files", async () => {
   const { client, calls } = fakeClient({ choice: "incomplete", confidence: 0.9 });
   const harness = createCompletionHarness(createWorkflowService({ getClient: () => client }));
 
-  await harness.emit("agent_end", FINISHED_TURN);
+  const results = await harness.emit("agent_before_settle", FINISHED_BOUNDARY);
   assert.equal(calls.count, 0);
-  assert.equal(harness.sent.length, 0);
+  assert.equal(results[0], undefined);
+});
+
+test("does not continue when Pi says it cannot", async () => {
+  const { client, calls } = fakeClient({ choice: "incomplete", confidence: 0.9 });
+  const harness = createCompletionHarness(createWorkflowService({ getClient: () => client }));
+
+  await harness.emit("tool_call", { toolName: "write", input: { path: "a.ts" } });
+  const results = await harness.emit("agent_before_settle", {
+    ...FINISHED_BOUNDARY,
+    context: { ...FINISHED_BOUNDARY.context, canContinue: false },
+  });
+  assert.equal(calls.count, 0);
+  assert.equal(results[0], undefined);
 });
 
 test("self-check runs at most once per user turn", async () => {
@@ -389,15 +456,20 @@ test("self-check runs at most once per user turn", async () => {
   const harness = createCompletionHarness(createWorkflowService({ getClient: () => client }));
 
   await harness.emit("tool_call", { toolName: "write", input: { path: "a.ts" } });
-  await harness.emit("agent_end", FINISHED_TURN);
-  await harness.emit("agent_end", FINISHED_TURN);
-  assert.equal(harness.sent.length, 1);
+  const first = await harness.emit("agent_before_settle", FINISHED_BOUNDARY);
+  const second = await harness.emit("agent_before_settle", FINISHED_BOUNDARY);
+  assert.equal(first[0].continue, true);
+  assert.equal(second[0], undefined);
 
-  // A new user prompt resets the budget.
-  await harness.emit("before_agent_start", { prompt: "next task" });
+  // A new user prompt resets the budget; the self-check continuation does not.
+  await harness.emit("before_agent_start", { messageType: "custom" });
+  await harness.emit("agent_before_settle", FINISHED_BOUNDARY);
+  assert.equal((await harness.emit("agent_before_settle", FINISHED_BOUNDARY))[0], undefined);
+
+  await harness.emit("before_agent_start", { messageType: "user", prompt: "next task" });
   await harness.emit("tool_call", { toolName: "write", input: { path: "b.ts" } });
-  await harness.emit("agent_end", FINISHED_TURN);
-  assert.equal(harness.sent.length, 2);
+  const next = await harness.emit("agent_before_settle", FINISHED_BOUNDARY);
+  assert.equal(next[0].continue, true);
 });
 
 test("completion self-check is inert when System One is disabled", async () => {
@@ -407,7 +479,7 @@ test("completion self-check is inert when System One is disabled", async () => {
   );
 
   await harness.emit("tool_call", { toolName: "write", input: { path: "a.ts" } });
-  await harness.emit("agent_end", FINISHED_TURN);
+  const results = await harness.emit("agent_before_settle", FINISHED_BOUNDARY);
   assert.equal(calls.count, 0);
-  assert.equal(harness.sent.length, 0);
+  assert.equal(results[0], undefined);
 });

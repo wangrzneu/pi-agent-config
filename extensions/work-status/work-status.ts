@@ -21,6 +21,34 @@ export const WORK_TYPE_LABELS: Record<WorkType, string> = {
   explore: "Explore",
 };
 
+
+const HEURISTIC_PATTERNS: ReadonlyArray<[WorkType, RegExp]> = [
+  ["review", /\b(review|audit|critique|inspect the diff)\b|评审|审阅|检查/i],
+  ["fix", /\b(fix|bug|broken|failure|regression|error|debug)\b|修复|故障|报错|调试/i],
+  ["test", /\b(test|tests|testing|pytest|jest|vitest|coverage)\b|测试|验证/i],
+  ["design", /\b(design|architecture|schema|interface design|api design)\b|设计|架构|接口设计/i],
+  ["plan", /\b(plan|roadmap|sequence|steps)\b|计划|规划|步骤/i],
+  ["explore", /\b(explore|investigate|understand|inspect|look into|find out)\b|探索|调查|了解/i],
+];
+
+/**
+ * Cheap local classification used to render the footer immediately. The model
+ * classifier can refine it later without blocking the agent turn.
+ */
+export function heuristicWorkType(prompt: string): WorkType {
+  for (const [type, pattern] of HEURISTIC_PATTERNS) {
+    if (pattern.test(prompt)) return type;
+  }
+  return "implement";
+}
+
+export function heuristicWorkClassification(prompt: string): {
+  type: WorkType;
+  summary: string;
+} {
+  return { type: heuristicWorkType(prompt), summary: summarizeWork(prompt) };
+}
+
 export function summarizeWork(prompt: string, maxWidth = 48): string {
   const normalized = prompt
     .replace(/```[\s\S]*?```/g, " ")

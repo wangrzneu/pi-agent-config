@@ -123,6 +123,17 @@ export function registerSandboxExtension(
   const authOptions = { ...authorizationOptions, piReadRoots };
   const readAuthorization = new SandboxPathAuthorization(authOptions);
   const writeAuthorization = new SandboxPathAuthorization(authOptions);
+  const PATH_TOOL_NAMES = ["sandbox_authorize_read", "sandbox_authorize_write"];
+  const setPathToolsActive = (active: boolean): void => {
+    const current = pi.getActiveTools();
+    const next = active
+      ? [...new Set([...current, ...PATH_TOOL_NAMES])]
+      : current.filter((name) => !PATH_TOOL_NAMES.includes(name));
+    if (next.length === current.length && next.every((name, index) => name === current[index])) {
+      return;
+    }
+    pi.setActiveTools(next);
+  };
   const baseBash = createBashToolDefinition(process.cwd());
   let initialized = false;
   let gitIdentity: GitIdentity | undefined;
@@ -156,6 +167,7 @@ export function registerSandboxExtension(
       loaded: loadedConfig,
     };
     setStatus(ctx, state);
+    setPathToolsActive(state.mode === "sandboxed");
     const reason = state.reason.replace(/[.\s]+$/, "");
     ctx.ui.notify(`Sandbox ${reason}. Bash is blocked; use --no-sandbox only for an explicit bypass.`, "error");
   };
@@ -268,6 +280,7 @@ export function registerSandboxExtension(
 
   pi.on("session_start", async (event, ctx) => {
     state = { mode: "starting", reason: "initializing" };
+    setPathToolsActive(false);
     await environmentController.reset();
     initialized = false;
     await kubernetesController.stop();
@@ -285,6 +298,7 @@ export function registerSandboxExtension(
     if (Boolean(pi.getFlag("no-sandbox"))) {
       state = { mode: "bypass", reason: "disabled by --no-sandbox" };
       setStatus(ctx, state);
+      setPathToolsActive(state.mode === "sandboxed");
       ctx.ui.notify("Sandbox bypassed explicitly by --no-sandbox", "warning");
       return;
     }
@@ -307,6 +321,7 @@ export function registerSandboxExtension(
     if (!loaded.config.enabled) {
       state = { mode: "bypass", reason: "disabled by configuration", loaded };
       setStatus(ctx, state);
+      setPathToolsActive(state.mode === "sandboxed");
       ctx.ui.notify("Sandbox disabled by configuration", "warning");
       return;
     }
@@ -318,6 +333,7 @@ export function registerSandboxExtension(
         loaded,
       };
       setStatus(ctx, state);
+      setPathToolsActive(state.mode === "sandboxed");
       ctx.ui.notify(state.reason, "error");
       return;
     }
@@ -395,6 +411,7 @@ export function registerSandboxExtension(
         environmentPlan: activeEnvironmentPlan,
       };
       setStatus(ctx, state);
+      setPathToolsActive(state.mode === "sandboxed");
       ctx.ui.notify("Process sandbox initialized", "info");
       if (
         loaded.config.kubernetes.promptOnStart
@@ -433,6 +450,27 @@ export function registerSandboxExtension(
 
   pi.registerCommand("sandbox", {
     description: "Show sandbox state, or manage path, network, and Kubernetes session grants",
+    getArgumentCompletions(prefix) {
+      const items = [
+        "reload",
+        "env status",
+        "env list",
+        "env prune",
+        "env prune --all",
+        "kube",
+        "kube select",
+        "kube revoke ",
+        "kube revoke-all",
+        "kube forget",
+        "allow-read ",
+        "allow-write ",
+        "revoke-read",
+        "revoke-write",
+        "revoke-network",
+      ].map((value) => ({ value, label: value }));
+      const filtered = items.filter((item) => item.value.startsWith(prefix));
+      return filtered.length > 0 ? filtered : null;
+    },
     handler: async (args, ctx) => {
       const trimmed = args.trim();
       if (trimmed.toLowerCase() === "reload") {

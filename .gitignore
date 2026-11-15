@@ -3,3 +3,4 @@
 .pi/
 node_modules/
 dist/
+bench/results/

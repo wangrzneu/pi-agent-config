@@ -22,6 +22,7 @@ function createHarness(runtime, flags = {}, authorizationOptions) {
   const statuses = new Map();
   const notifications = [];
   const confirmations = [];
+  let activeTools = [];
   const pi = {
     registerFlag() {},
     getFlag(name) {
@@ -31,12 +32,19 @@ function createHarness(runtime, flags = {}, authorizationOptions) {
       if (tool.name === "bash") bashTool = tool;
       if (tool.name === "sandbox_authorize_read") authorizationTool = tool;
       if (tool.name === "sandbox_authorize_write") writeAuthorizationTool = tool;
+      if (tool.defaultActive !== false) activeTools.push(tool.name);
     },
     registerCommand(name, definition) {
       commands.set(name, definition.handler);
     },
     on(name, handler) {
       handlers.set(name, handler);
+    },
+    getActiveTools() {
+      return [...activeTools];
+    },
+    setActiveTools(names) {
+      activeTools = [...names];
     },
   };
   const ctx = {
@@ -98,6 +106,7 @@ function createHarness(runtime, flags = {}, authorizationOptions) {
     notifications,
     confirmations,
     kubernetesSelectionStore,
+    getActiveTools: () => [...activeTools],
   };
 }
 
@@ -161,6 +170,18 @@ test("unpinned local environments resolve through the Process sandbox", async ()
   assert.ok(harness.notifications.some(({ message }) => /Process sandbox initialized/.test(message)));
   await harness.commands.get("sandbox")("", harness.ctx);
   assert.match(harness.notifications.at(-1).message, /go: 1\.24\.2 \(local/);
+});
+
+test("path authorization tools are active only while sandboxed", async () => {
+  const active = createHarness(createRuntime().runtime);
+  await active.handlers.get("session_start")({}, active.ctx);
+  assert.ok(active.getActiveTools().includes("sandbox_authorize_read"));
+  assert.ok(active.getActiveTools().includes("sandbox_authorize_write"));
+
+  const bypass = createHarness(createRuntime().runtime, { "no-sandbox": true });
+  await bypass.handlers.get("session_start")({}, bypass.ctx);
+  assert.equal(bypass.getActiveTools().includes("sandbox_authorize_read"), false);
+  assert.equal(bypass.getActiveTools().includes("sandbox_authorize_write"), false);
 });
 
 test("unlisted network domains request approval once per session", async () => {

@@ -40,7 +40,8 @@ The allowlist should stay narrow. New commands or flags require tests showing bo
 - `/btw` sends the current compaction-aware conversation context and side question to the selected model provider.
 - The isolated request can use only the built-in `read`, `grep`, `find`, and `ls` tools. It cannot run shell commands or mutate files.
 - The question, model responses, and tool results are not appended to the Pi session.
-- Tool use is capped at four rounds and twelve calls, with a shared 30-second timeout.
+- Tool use is capped at four rounds and twelve calls, with a 45-second timeout per
+  model round and a 120-second total timeout.
 - Up to 20 successful exchanges remain in process memory for history navigation. They are discarded on reload, session replacement, exit, or explicit `x` clearing.
 - Copying an answer to the system clipboard is always user-initiated with `c`.
 

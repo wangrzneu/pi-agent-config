@@ -1,6 +1,6 @@
 # Synced-folder external-memory test plan
 
-Status: proposed
+Status: active verification plan
 
 This plan verifies the design in [`external-memory.md`](external-memory.md). It
 covers the public module interface, Pi lifecycle integration, filesystem failure

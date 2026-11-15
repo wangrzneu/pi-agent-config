@@ -1,0 +1,22 @@
+[
+  {
+    "id": "fix-example-bug",
+    "repo": "https://github.com/your-org/your-repo",
+    "commit": "main",
+    "setup": "npm ci",
+    "prompt": "Fix the failing test in the authentication flow and add a regression test.",
+    "test": "npm test",
+    "timeoutSec": 900,
+    "setupTimeoutSec": 1800,
+    "testTimeoutSec": 900
+  },
+  {
+    "id": "add-example-feature",
+    "repo": "https://github.com/your-org/your-repo",
+    "commit": "main",
+    "setup": "npm ci",
+    "prompt": "Add a small documented feature and run the relevant checks.",
+    "test": "npm test",
+    "timeoutSec": 900
+  }
+]

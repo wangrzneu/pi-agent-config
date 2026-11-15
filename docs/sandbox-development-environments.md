@@ -1,6 +1,6 @@
 # Sandbox development environments and Kubernetes access
 
-This document defines the planned development-environment system for
+This document defines the development-environment system for
 [`extensions/sandbox`](../extensions/sandbox). It extends the Process sandbox
 with composable Go, Python, Node.js, pnpm, kubectl, and AWS CLI profiles,
 dynamic installation, bounded storage, and session-scoped Kubernetes context

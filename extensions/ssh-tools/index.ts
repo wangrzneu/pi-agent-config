@@ -50,6 +50,25 @@ const MAX_COMMAND_LENGTH = 32_768;
 const DEFAULT_OUTPUT_BYTES = 32 * 1024;
 const MAX_OUTPUT_BYTES = 256 * 1024;
 
+const SSH_NAMESPACE = {
+  name: "ssh",
+  description: "Remote SSH execution, workspace transfers, and detached jobs",
+};
+
+const SSH_TOOL_BASE = {
+  defaultActive: false,
+  namespace: SSH_NAMESPACE,
+};
+
+const SSH_ANNOTATIONS = {
+  enable: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  exec: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  files: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  jobStart: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+  jobStatus: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
+  jobCancel: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+};
+
 const CAPABILITIES = Type.Array(
   Type.Union([
     Type.Literal("exec"),
@@ -271,6 +290,8 @@ export function registerSshToolsExtension(
 
   pi.registerTool({
     name: "ssh_enable",
+    ...SSH_TOOL_BASE,
+    annotations: SSH_ANNOTATIONS.enable,
     label: "Enable SSH tools",
     description: "Authorize one SSH host and selected capabilities for this session, with bounded connection retry settings.",
     promptSnippet: "Use ssh_enable before remote SSH work to activate the required capability groups",
@@ -317,6 +338,8 @@ export function registerSshToolsExtension(
 
   pi.registerTool({
     name: "ssh_exec",
+    ...SSH_TOOL_BASE,
+    annotations: SSH_ANNOTATIONS.exec,
     label: "SSH execute",
     description: "Run one bounded foreground shell command on an authorized SSH host. Use ssh_job_start for long work.",
     parameters: Type.Object({
@@ -363,6 +386,8 @@ export function registerSshToolsExtension(
 
   pi.registerTool({
     name: "ssh_upload",
+    ...SSH_TOOL_BASE,
+    annotations: SSH_ANNOTATIONS.files,
     label: "SSH upload",
     description: "Upload one binary-safe file from the current workspace to an authorized SSH host using scp.",
     parameters: Type.Object({
@@ -393,6 +418,8 @@ export function registerSshToolsExtension(
 
   pi.registerTool({
     name: "ssh_download",
+    ...SSH_TOOL_BASE,
+    annotations: SSH_ANNOTATIONS.files,
     label: "SSH download",
     description: "Download one binary-safe file from an authorized SSH host into the current workspace using scp.",
     parameters: Type.Object({
@@ -429,6 +456,8 @@ export function registerSshToolsExtension(
 
   pi.registerTool({
     name: "ssh_job_start",
+    ...SSH_TOOL_BASE,
+    annotations: SSH_ANNOTATIONS.jobStart,
     label: "Start SSH job",
     description: "Start a detached remote command and return a stable job ID for later status or cancellation.",
     parameters: Type.Object({
@@ -499,6 +528,8 @@ export function registerSshToolsExtension(
 
   pi.registerTool({
     name: "ssh_job_status",
+    ...SSH_TOOL_BASE,
+    annotations: SSH_ANNOTATIONS.jobStatus,
     label: "SSH job status",
     description: "Read state and bounded incremental stdout/stderr for a job started by this Pi session.",
     parameters: Type.Object({
@@ -554,6 +585,8 @@ export function registerSshToolsExtension(
 
   pi.registerTool({
     name: "ssh_job_cancel",
+    ...SSH_TOOL_BASE,
+    annotations: SSH_ANNOTATIONS.jobCancel,
     label: "Cancel SSH job",
     description: "Terminate a running job started by this Pi session, escalating from TERM to KILL after a grace period.",
     parameters: Type.Object({
@@ -618,6 +651,12 @@ export function registerSshToolsExtension(
 
   pi.registerCommand("ssh-tools", {
     description: "Show SSH tool state or use /ssh-tools off|on|reset",
+    getArgumentCompletions(prefix) {
+      const items = ["off", "on", "reset"]
+        .filter((value) => value.startsWith(prefix))
+        .map((value) => ({ value, label: value }));
+      return items.length > 0 ? items : null;
+    },
     handler: async (args, ctx) => {
       const action = args.trim().toLowerCase();
       if (action === "off") {

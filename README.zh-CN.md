@@ -47,6 +47,7 @@
 | `extensions/system-one/` | 可选的 System One 决策客户端与工作流路由 |
 | `skills/pi-workflow/` | 精简的默认工作规范 |
 | `prompts/` | 按需使用的 review、debugging 和 architecture 提示词 |
+| `bench/` | System One 的配对 A/B 运行器与分析脚本 |
 | `docs/` | 代码探索、外部项目和安全边界参考文档 |
 | `settings.example.json` | 项目级 Pi package 配置示例 |
 
@@ -68,6 +69,8 @@
 | `docs/exploration.md` | 代码探索指引 |
 | `docs/external-projects.md` | 处理外部项目 |
 | `docs/system-one.md` | System One 决策：路由、变更风险、完成自检、上下文筛选与校准 |
+| `docs/ab-testing.md` | 配对 A/B 运行器、任务格式、指标与分析 |
+| `docs/improvement-plan.md` | Review 发现与 P0/P1/P2/P3 路线图 |
 
 ## 📋 前置条件
 
@@ -230,6 +233,13 @@ Agent 运行时，页脚会显示当前任务摘要及工作类型：设计、�
 npm test
 ```
 
+运行 System One 配对 A/B（详见 [`docs/ab-testing.md`](docs/ab-testing.md)）：
+
+```bash
+node bench/run.mjs --tasks bench/tasks.example.json --model provider/model:high --reps 3
+node bench/analyze.mjs --runs bench/results
+```
+
 ## 🔄 更新与移除
 
 ```bash
@@ -250,12 +260,13 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
 - `prompts/` 中的模板只在对应任务中按需使用。
 - `docs/` 是参考材料，不应自动加入每次任务的上下文。
 - plan mode 的模型提醒只在进入模式后注入一次；只读限制由工具拦截器持续执行。
-- 每个未缓存任务的工作状态会发起一次关闭思考的短模型请求，消耗少量 token，但不会把结果加入
-  会话上下文。
-- 工作流路由在未设置 `TYPESAFE_API_KEY` 时完全不生效；启用后每个未缓存提示词发起一次简短的
+- 工作状态会立即显示本地启发式结果；除非设置 `PI_WORK_STATUS_CLASSIFIER=0`，否则还会发起一次
+  关闭思考的短模型请求来细化页脚，结果不会加入会话上下文。
+- 工作流路由仅在未配置分类器提供方时不生效（设置 `TYPESAFE_API_KEY`，或在 Pi 中已配置提供方时
+  设置 `PI_SYSTEM_ONE_ENABLED=1`）；启用后每个未缓存提示词发起一次简短的
   System One 决策请求，且只注入一条隐藏的工作流提示；工作状态复用同一决策，因此每个会话中
-  一个提示词只判定一次。每次 edit/write 还会做变更风险分级，高风险（或不确定）的改动会在下次
-  模型调用前注入一条隐藏的复查提示。在有过文件改动的回合结束后，完成自检可能再触发一次验证
+  一个提示词只判定一次。edit/write 会按模型请求批量做变更风险分级，高风险（或不确定）的改动会在
+  下次模型调用前注入一条隐藏的复查提示。在有过文件改动的回合结束后，完成自检可能再触发一次验证
   流程（每个用户提示最多一次）。另外提供 `context_select` 工具，按相关性排序候选文件。
   `/system-one on|off` 可在运行时同时开关这些功能；配置会在
   每次会话开始时重新解析。
@@ -278,7 +289,8 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
 
 ## 🔒 安全提醒
 
-本地命令沙箱只约束 shell 子进程，不会隔离 Pi 的直接文件工具、package 或扩展；Plan mode
+本地命令沙箱只约束 shell 子进程；Pi 的直接文件工具另有一层路径授权，而 package 与扩展代码仍
+在操作系统沙箱之外运行；Plan mode
 也仍然只是防误操作机制。安装前请审查源码，处理真实凭据、生产代码或恶意项目时应使用容器、
 虚拟机或专用低权限用户。详见 [`docs/security.md`](docs/security.md)。
 

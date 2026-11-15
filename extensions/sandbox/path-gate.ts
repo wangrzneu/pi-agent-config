@@ -36,6 +36,16 @@ export function registerPathAuthorizationTool(
   pi.registerTool({
     name: `sandbox_authorize_${access}`,
     label: `Authorize sandbox ${access}`,
+    defaultActive: false,
+    namespace: {
+      name: "sandbox",
+      description: "Session-scoped sandbox path and network authorization",
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      openWorldHint: false,
+    },
     description: `Request explicit user approval to ${meta.action} files or directories outside the current workspace for this session. Call this before using ${meta.tools} on external paths.`,
     promptSnippet: `Request user authorization before ${meta.activity} paths outside the workspace`,
     promptGuidelines: [

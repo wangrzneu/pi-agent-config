@@ -8,11 +8,16 @@
  * build a service directly with `createWorkflowService`.
  *
  * All three decisions are `choice` questions (the primitive that returns a
- * calibrated `confidence`) sent to `POST /v1/systemone`.
+ * calibrated `confidence`) resolved through Pi's classifier registry. Context
+ * selection uses one `bool` question per candidate.
  */
 
 import { createHash } from "node:crypto";
-import { createHttpSystemOneClient } from "./client.ts";
+import { appendFile } from "node:fs/promises";
+import {
+  createRegistrySystemOneClient,
+  type ClassifierRegistry,
+} from "./client.ts";
 import { readSystemOneConfig, SYSTEM_ONE_DEFAULTS } from "./config.ts";
 import { MAX_STATE_CHARACTERS, WORKFLOW_QUESTION } from "./routing.ts";
 import { RISK_QUESTION } from "./risk.ts";
@@ -22,9 +27,20 @@ import type { ChoiceQuestion, DecisionKind, DecisionResult, SystemOneClient } fr
 
 const CACHE_ENTRIES = 128;
 
+/** Optional JSONL decision trace for A/B analysis; never affects decisions. */
+let traceQueue: Promise<void> = Promise.resolve();
+function trace(entry: Record<string, unknown>): void {
+  const path = process.env.PI_SYSTEM_ONE_TRACE?.trim();
+  if (!path) return;
+  const line = `${JSON.stringify({ ...entry, at: new Date().toISOString() })}\n`;
+  traceQueue = traceQueue
+    .then(() => appendFile(path, line))
+    .catch(() => undefined);
+}
+
 export interface WorkflowServiceStatus {
   configured: boolean;
-  endpoint?: string;
+  provider?: string;
   model?: string;
 }
 
@@ -91,12 +107,31 @@ export function createWorkflowService(
       .update(`${question.id}\n${trimmed}`)
       .digest("hex");
     const cached = cache.get(key);
-    if (cached) return cached;
+    if (cached) {
+      trace({
+        kind: "choice",
+        id: question.id,
+        cached: true,
+        ok: true,
+        confidence: cached.confidence,
+        ms: 0,
+      });
+      return cached;
+    }
 
+    const started = Date.now();
     const decision = await client.decide(
       { question, state: trimmed, maxStateCharacters: MAX_STATE_CHARACTERS },
       signal,
     );
+    trace({
+      kind: "choice",
+      id: question.id,
+      cached: false,
+      ok: Boolean(decision),
+      confidence: decision?.confidence,
+      ms: Date.now() - started,
+    });
     if (!decision) return undefined;
 
     if (cache.size >= CACHE_ENTRIES) {
@@ -123,11 +158,15 @@ export function createWorkflowService(
         .update(`${trimmed}\n${candidates.map((c) => c.id).join("\n")}`)
         .digest("hex");
       const cached = contextCache.get(key);
-      if (cached) return cached;
+      if (cached) {
+        trace({ kind: "noul", cached: true, ok: true, count: candidates.length, ms: 0 });
+        return cached;
+      }
 
       const request = buildContextRequest(trimmed, candidates);
       if (request.questions.length === 0) return undefined;
 
+      const started = Date.now();
       const assessment = await client.assessNoul(
         {
           questions: request.questions,
@@ -136,6 +175,13 @@ export function createWorkflowService(
         },
         signal,
       );
+      trace({
+        kind: "noul",
+        cached: false,
+        ok: Boolean(assessment),
+        count: request.questions.length,
+        ms: Date.now() - started,
+      });
       if (!assessment) return undefined;
 
       if (contextCache.size >= CACHE_ENTRIES) {
@@ -159,17 +205,26 @@ export function createWorkflowService(
 
 let singleton: WorkflowService | undefined;
 
-/** Rebuild the shared service from the current environment. */
-export function configureWorkflowService(): WorkflowService {
-  const config = readSystemOneConfig();
-  const client = config ? createHttpSystemOneClient(config) : undefined;
+/**
+ * Rebuild the shared service from the current environment and Pi's classifier
+ * registry. Called from `session_start`; a missing registry leaves the service
+ * disabled rather than falling back to a private HTTP client.
+ */
+export function configureWorkflowService(
+  registry?: ClassifierRegistry,
+  env: Record<string, string | undefined> = process.env,
+): WorkflowService {
+  const config = readSystemOneConfig(env);
+  const client = config && registry
+    ? createRegistrySystemOneClient(registry, config)
+    : undefined;
   singleton = createWorkflowService({
     getClient: () => client,
     getThreshold: (decision) =>
       config?.thresholds[decision] ?? SYSTEM_ONE_DEFAULTS.thresholds[decision],
     getStatus: () => ({
-      configured: Boolean(config),
-      endpoint: config?.baseUrl,
+      configured: Boolean(config && client),
+      provider: config?.provider,
       model: config?.model,
     }),
   });

@@ -1,54 +1,63 @@
 /**
  * System One decision client.
  *
- * Speaks the real `POST /v1/systemone` contract (see
- * `https://api.typesafe.ai/openapi.json`, mirrored by `typesafe_sdk`):
+ * The transport is Pi's classifier registry, not a private HTTP client:
  *
- *   POST <baseUrl>/v1/systemone
- *   authorization: Bearer <TYPESAFE_API_KEY>
- *   { "state": "...", "model": "jev-latest",
- *     "questions": { "<id>": { "type": "choice", "instructions": "...",
- *                              "criteria": { "<label>": "<description>" } },
- *                    "<id2>": { "type": "noul", "instructions": "..." } } }
- *   -> { "answers": { "<id>":  { "type": "choice", "choice": "...",
- *                                "confidence": 0.87, "probabilities": {...} },
- *                     "<id2>": { "type": "noul", "noul": 0.91 } } }
+ *   const client = createRegistrySystemOneClient(ctx.modelRegistry, config)
  *
- * Every failure path — transport error, non-2xx, malformed body, off-schema
- * choice, out-of-range confidence, timeout — collapses to `undefined`, so
- * callers fail open and fall back to their existing behavior.
+ * `client.decide()` maps to one `choice` question; `client.assessNoul()` maps
+ * to one `bool` question per candidate. Pi resolves the provider credential,
+ * the endpoint, and usage/cost accounting, and never rejects a classifier
+ * call. This module only maps the extension's decision types to Pi's
+ * `ClassifierContext`/`ClassifierResult` and validates the answers.
+ *
+ * Every failure path — missing model, error/aborted result, off-schema answer,
+ * invalid probability, timeout — collapses to `undefined`, so callers fail open.
  */
 
+import type {
+  ClassifierApi,
+  ClassifierContext,
+  ClassifierModel,
+  ClassifierQuestion,
+  ClassifierResult,
+  JsonObject,
+  ModelsClassifierOptions,
+} from "@earendil-works/pi-ai";
 import type { SystemOneConfig } from "./config.ts";
-import { readSystemOneConfig, systemOneUrl } from "./config.ts";
+import { readSystemOneConfig, type ReadSystemOneOptions } from "./config.ts";
 import type {
   ChoiceQuestion,
   DecisionRequest,
   DecisionResult,
   NoulAssessment,
+  NoulQuestion,
   NoulRequest,
   SystemOneClient,
 } from "./types.ts";
 
-export interface DecisionBody {
-  state: string;
-  model: string;
-  questions: Record<string, WireQuestion>;
+/**
+ * The subset of Pi's `ModelRegistry` / `ModelRuntime` this client needs.
+ * Both types satisfy it structurally; tests inject a fake.
+ */
+export interface ClassifierRegistry {
+  getModelOfType(
+    type: "classifier",
+    provider: string,
+    modelId: string,
+  ): ClassifierModel<ClassifierApi> | undefined;
+  classify(
+    model: ClassifierModel<ClassifierApi>,
+    context: ClassifierContext,
+    options?: ModelsClassifierOptions,
+  ): Promise<ClassifierResult>;
 }
 
-interface WireChoiceQuestion {
-  type: "choice";
-  instructions: string;
-  criteria: Record<string, string>;
-}
+/** Field used to wrap the extension's string state in a JSON object. */
+export const STATE_FIELD = "text";
 
-interface WireNoulQuestion {
-  type: "noul";
-  instructions: string;
-  criteria?: { true?: string; false?: string };
-}
-
-type WireQuestion = WireChoiceQuestion | WireNoulQuestion;
+const DEFAULT_TRUE_CRITERION = "The statement is true.";
+const DEFAULT_FALSE_CRITERION = "The statement is false.";
 
 function boundState(state: string, maxStateCharacters?: number): string {
   return typeof maxStateCharacters === "number" && maxStateCharacters > 0
@@ -56,99 +65,54 @@ function boundState(state: string, maxStateCharacters?: number): string {
     : state;
 }
 
-function baseBody(
-  state: string,
-  maxStateCharacters: number | undefined,
-  model: string,
-  questions: Record<string, WireQuestion>,
-): DecisionBody {
-  return { state: boundState(state, maxStateCharacters), model, questions };
+function stateObject(state: string, maxStateCharacters?: number): JsonObject {
+  return { [STATE_FIELD]: boundState(state, maxStateCharacters) };
 }
 
-/** Build a single-`choice` request body, truncating state to the declared bound. */
-export function buildDecisionBody(
-  request: DecisionRequest,
-  model: string,
-): DecisionBody {
-  return baseBody(request.state, request.maxStateCharacters, model, {
-    [request.question.id]: {
-      type: "choice",
-      instructions: request.question.instructions,
-      criteria: { ...request.question.criteria },
-    },
-  });
-}
-
-/** Build a multi-`noul` request body, truncating state to the declared bound. */
-export function buildNoulBody(
-  request: NoulRequest,
-  model: string,
-): DecisionBody {
-  const questions: Record<string, WireQuestion> = {};
-  for (const question of request.questions) {
-    questions[question.id] = {
-      type: "noul",
-      instructions: question.instructions,
-      ...(question.criteria ? { criteria: { ...question.criteria } } : {}),
-    };
-  }
-  return baseBody(request.state, request.maxStateCharacters, model, questions);
-}
-
-/** Validate a `choice` answer from a `/v1/systemone` payload. */
-export function parseDecisionResponse(
-  payload: unknown,
-  question: ChoiceQuestion,
-): DecisionResult | undefined {
-  const record = answerOf(payload, question.id);
-  if (!record || record.type !== "choice") return undefined;
-
-  const labels = Object.keys(question.criteria);
-  const choice = typeof record.choice === "string" ? record.choice : undefined;
-  if (!choice || !labels.includes(choice)) return undefined;
-
-  const confidence =
-    typeof record.confidence === "number" ? record.confidence : undefined;
-  if (!isProbability(confidence)) return undefined;
-
-  const probabilities = parseProbabilities(record.probabilities, labels);
-  return probabilities
-    ? { choice, confidence, probabilities }
-    : { choice, confidence };
+/** Map a choice question to Pi's classifier question shape. */
+export function toChoiceQuestion(question: ChoiceQuestion): ClassifierQuestion {
+  return {
+    type: "choice",
+    instructions: question.instructions,
+    criteria: { ...question.criteria },
+  };
 }
 
 /**
- * Validate `noul` answers from a `/v1/systemone` payload. Requires **every**
- * requested question to be answered cleanly: a partial result would silently
- * score the missing candidates as 0 and drop relevant files.
+ * Map a `noul` question to Pi's `bool` question. Pi requires both criterion
+ * labels, so missing labels get neutral defaults.
  */
-export function parseNoulResponse(
-  payload: unknown,
-  questionIds: readonly string[],
-): NoulAssessment | undefined {
-  if (questionIds.length === 0) return undefined;
-  const probabilities: Record<string, number> = {};
-  for (const id of questionIds) {
-    const record = answerOf(payload, id);
-    if (!record || record.type !== "noul" || !isProbability(record.noul)) {
-      return undefined;
-    }
-    probabilities[id] = record.noul;
-  }
-  return { probabilities };
+export function toBoolQuestion(question: NoulQuestion): ClassifierQuestion {
+  return {
+    type: "bool",
+    instructions: question.instructions,
+    criteria: {
+      true: question.criteria?.true ?? DEFAULT_TRUE_CRITERION,
+      false: question.criteria?.false ?? DEFAULT_FALSE_CRITERION,
+    },
+  };
 }
 
-function answerOf(
-  payload: unknown,
-  id: string,
-): Record<string, unknown> | undefined {
-  if (!payload || typeof payload !== "object") return undefined;
-  const answers = (payload as Record<string, unknown>).answers;
-  if (!answers || typeof answers !== "object") return undefined;
-  const answer = (answers as Record<string, unknown>)[id];
-  return answer && typeof answer === "object"
-    ? (answer as Record<string, unknown>)
-    : undefined;
+/** Build a single-question `choice` classifier context. */
+export function buildChoiceContext(request: DecisionRequest): ClassifierContext {
+  return {
+    state: stateObject(request.state, request.maxStateCharacters),
+    questions: {
+      [request.question.id]: toChoiceQuestion(request.question),
+    },
+  };
+}
+
+/** Build a multi-question `bool` classifier context. */
+export function buildNoulContext(request: NoulRequest): ClassifierContext {
+  const questions: Record<string, ClassifierQuestion> = {};
+  for (const question of request.questions) {
+    questions[question.id] = toBoolQuestion(question);
+  }
+  return {
+    state: stateObject(request.state, request.maxStateCharacters),
+    questions,
+  };
 }
 
 function isProbability(value: unknown): value is number {
@@ -173,75 +137,109 @@ function parseProbabilities(
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
-async function postJson(
-  config: SystemOneConfig,
-  body: DecisionBody,
-  signal: AbortSignal | undefined,
-  fetchImpl: typeof fetch,
-): Promise<unknown | undefined> {
-  try {
-    const timeoutSignal = AbortSignal.timeout(config.timeoutMs);
-    const combinedSignal = signal
-      ? AbortSignal.any([signal, timeoutSignal])
-      : timeoutSignal;
+/** Validate one `choice` answer from a Pi classifier result. */
+export function parseDecisionResult(
+  result: ClassifierResult | undefined,
+  question: ChoiceQuestion,
+): DecisionResult | undefined {
+  if (!result || result.stopReason !== "stop") return undefined;
 
-    const response = await fetchImpl(systemOneUrl(config.baseUrl), {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json",
-        authorization: `Bearer ${config.apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal: combinedSignal,
-    });
-    if (!response.ok) return undefined;
-    return await response.json();
-  } catch {
-    return undefined;
-  }
+  const answer = result.answers?.[question.id];
+  if (!answer || answer.type !== "choice") return undefined;
+
+  const labels = Object.keys(question.criteria);
+  if (!labels.includes(answer.choice)) return undefined;
+  if (!isProbability(answer.confidence)) return undefined;
+
+  const probabilities = parseProbabilities(answer.probabilities, labels);
+  return probabilities
+    ? { choice: answer.choice, confidence: answer.confidence, probabilities }
+    : { choice: answer.choice, confidence: answer.confidence };
 }
 
-/** Build an HTTP client. `fetchImpl` is injectable so tests stay offline. */
-export function createHttpSystemOneClient(
+/**
+ * Validate `bool` answers from a Pi classifier result. Requires **every**
+ * requested question to be answered cleanly: a partial result would silently
+ * score the missing candidates as 0 and drop relevant files.
+ */
+export function parseNoulResult(
+  result: ClassifierResult | undefined,
+  questionIds: readonly string[],
+): NoulAssessment | undefined {
+  if (!result || result.stopReason !== "stop" || questionIds.length === 0) {
+    return undefined;
+  }
+
+  const probabilities: Record<string, number> = {};
+  for (const id of questionIds) {
+    const answer = result.answers?.[id];
+    if (!answer || answer.type !== "bool" || !isProbability(answer.probability)) {
+      return undefined;
+    }
+    probabilities[id] = answer.probability;
+  }
+  return { probabilities };
+}
+
+function boundedSignal(
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+/** Build a client over Pi's classifier registry. Returns `undefined` when the model is absent. */
+export function createRegistrySystemOneClient(
+  registry: ClassifierRegistry,
   config: SystemOneConfig,
-  fetchImpl: typeof fetch = fetch,
-): SystemOneClient {
+): SystemOneClient | undefined {
+  const model = registry.getModelOfType(
+    "classifier",
+    config.provider,
+    config.model,
+  );
+  if (!model) return undefined;
+
+  const classify = async (
+    context: ClassifierContext,
+    signal: AbortSignal | undefined,
+  ): Promise<ClassifierResult | undefined> => {
+    try {
+      return await registry.classify(model, context, {
+        signal: boundedSignal(signal, config.timeoutMs),
+      });
+    } catch {
+      // `ModelRegistry.classify()` never rejects, but a custom registry may.
+      return undefined;
+    }
+  };
+
   return {
     async decide(request, signal) {
-      const payload = await postJson(
-        config,
-        buildDecisionBody(request, config.model),
-        signal,
-        fetchImpl,
-      );
-      return payload === undefined
-        ? undefined
-        : parseDecisionResponse(payload, request.question);
+      const result = await classify(buildChoiceContext(request), signal);
+      return parseDecisionResult(result, request.question);
     },
     async assessNoul(request, signal) {
-      const payload = await postJson(
-        config,
-        buildNoulBody(request, config.model),
-        signal,
-        fetchImpl,
+      const result = await classify(buildNoulContext(request), signal);
+      return parseNoulResult(
+        result,
+        request.questions.map((question) => question.id),
       );
-      return payload === undefined
-        ? undefined
-        : parseNoulResponse(
-            payload,
-            request.questions.map((question) => question.id),
-          );
     },
   };
 }
 
-/** Create a client from the environment, or `undefined` when unconfigured. */
+/**
+ * Create a client from the environment and a classifier registry.
+ * Returns `undefined` when unconfigured or when the configured model is absent.
+ */
 export function createSystemOneClient(
+  registry: ClassifierRegistry,
   env: Record<string, string | undefined> = process.env,
-  fetchImpl: typeof fetch = fetch,
+  options: ReadSystemOneOptions = {},
 ): SystemOneClient | undefined {
-  const config = readSystemOneConfig(env);
+  const config = readSystemOneConfig(env, options);
   if (!config) return undefined;
-  return createHttpSystemOneClient(config, fetchImpl);
+  return createRegistrySystemOneClient(registry, config);
 }

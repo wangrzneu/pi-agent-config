@@ -8,6 +8,8 @@ import {
 import { setPlanModeActive } from "./plan-mode-state.ts";
 import {
   describeToolActivity,
+  heuristicWorkClassification,
+  heuristicWorkType,
   summarizeWork,
 } from "./work-status.ts";
 
@@ -171,19 +173,63 @@ test("shows Plan while read-only plan mode is active", async () => {
   }
 });
 
-test("shows nothing when model classification fails", async () => {
+test("falls back to the local heuristic when model classification fails", async () => {
   const harness = createHarness(async () => undefined);
 
   await harness.emit("before_agent_start", { prompt: "实现新的状态扩展" });
 
-  assert.equal(
-    harness.statuses.some(([, text]) => text !== undefined),
-    false,
-  );
-  assert.equal(
-    harness.workingMessages.some((message) => message !== undefined),
-    false,
-  );
+  assert.match(harness.statuses.at(-1)[1], / Implement · 实现新的状态扩展$/);
+  assert.equal(harness.workingMessages.at(-1), "Implement · 实现新的状态扩展");
+});
+
+test("does not block before_agent_start on the model classifier", async () => {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const harness = createHarness(async () => {
+    await gate;
+    return { type: "review", summary: "late review" };
+  });
+
+  await harness.emit("before_agent_start", { prompt: "review this change" });
+  assert.match(harness.statuses.at(-1)[1], / Review · review this change$/);
+
+  release();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(harness.statuses.at(-1)[1], / Review · late review$/);
+});
+
+test("PI_WORK_STATUS_CLASSIFIER=0 skips the model request", async () => {
+  const previous = process.env.PI_WORK_STATUS_CLASSIFIER;
+  process.env.PI_WORK_STATUS_CLASSIFIER = "0";
+  try {
+    let calls = 0;
+    const harness = createHarness(async () => {
+      calls++;
+      return { type: "review", summary: "model" };
+    });
+    await harness.emit("before_agent_start", { prompt: "implement status" });
+    assert.equal(calls, 0);
+    assert.match(harness.statuses.at(-1)[1], / Implement · implement status$/);
+  } finally {
+    if (previous === undefined) delete process.env.PI_WORK_STATUS_CLASSIFIER;
+    else process.env.PI_WORK_STATUS_CLASSIFIER = previous;
+  }
+});
+
+test("local heuristics cover common intents", () => {
+  assert.equal(heuristicWorkType("review this PR"), "review");
+  assert.equal(heuristicWorkType("修复登录 bug"), "fix");
+  assert.equal(heuristicWorkType("run the tests"), "test");
+  assert.equal(heuristicWorkType("design the schema"), "design");
+  assert.equal(heuristicWorkType("plan the migration"), "plan");
+  assert.equal(heuristicWorkType("investigate the parser"), "explore");
+  assert.equal(heuristicWorkType("add a login route"), "implement");
+  assert.deepEqual(heuristicWorkClassification("fix the bug"), {
+    type: "fix",
+    summary: "fix the bug",
+  });
 });
 
 test("does not classify outside TUI mode", async () => {

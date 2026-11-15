@@ -1,13 +1,10 @@
 /**
- * Shared types for the System One decision client.
+ * Shared decision types for the System One decision layer.
  *
- * These mirror the real `typesafe_sdk` / `POST /v1/systemone` contract:
- * a request carries a `state` document plus named `questions`, and the response
- * carries `answers` keyed by the same names. Two primitives are wired:
- *
- * - `choice` (one decision) — the one that returns a calibrated `confidence`.
- * - `noul` (yes/no) — many independent questions in one request, used to rank a
- *   candidate set by relevance.
+ * The extension expresses decisions as `choice` questions and `noul`
+ * (yes/no-probability) questions. `client.ts` maps them to Pi's classifier
+ * types: `noul` becomes `bool`, and `choice` stays `choice`. Pi's model
+ * registry owns provider auth, the endpoint, and usage accounting.
  *
  * See `docs/system-one.md`.
  */

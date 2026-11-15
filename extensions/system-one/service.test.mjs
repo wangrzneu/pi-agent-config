@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { createWorkflowService } from "./service.ts";
 import { DEFAULT_ROUTING_THRESHOLD, MAX_STATE_CHARACTERS, WORKFLOW_SCHEMA } from "./routing.ts";
@@ -169,15 +172,90 @@ test("exposes per-decision thresholds and status with defaults", async () => {
   const configured = createWorkflowService({
     getClient: () => undefined,
     getThreshold: (decision) => (decision === "risk" ? 0.9 : 0.5),
-    getStatus: () => ({ configured: true, endpoint: "https://example.test", model: "jev-latest" }),
+    getStatus: () => ({ configured: true, provider: "typesafe", model: "jev-latest" }),
   });
   assert.equal(configured.threshold("risk"), 0.9);
   assert.equal(configured.threshold("intent"), 0.5);
   assert.equal(configured.threshold("completion"), 0.5);
   assert.deepEqual(configured.status(), {
     configured: true,
-    endpoint: "https://example.test",
+    provider: "typesafe",
     model: "jev-latest",
   });
   assert.equal(configured.isEnabled(), true);
+});
+
+test("configures the shared service from Pi's classifier registry", async () => {
+  const { configureWorkflowService, resetWorkflowService } = await import("./service.ts");
+  resetWorkflowService();
+  const calls = [];
+  const registry = {
+    getModelOfType(type, provider, modelId) {
+      calls.push({ type, provider, modelId });
+      return { id: modelId };
+    },
+    async classify(_model, context) {
+      calls.push({ context });
+      return {
+        stopReason: "stop",
+        answers: {
+          [WORKFLOW_SCHEMA]: { type: "choice", choice: "fix", confidence: 0.9 },
+        },
+      };
+    },
+  };
+
+  try {
+    const service = configureWorkflowService(registry, { TYPESAFE_API_KEY: "k" });
+    assert.deepEqual(service.status(), {
+      configured: true,
+      provider: "typesafe",
+      model: "jev-latest",
+    });
+    assert.deepEqual(await service.decideIntent("fix it"), {
+      choice: "fix",
+      confidence: 0.9,
+    });
+    assert.equal(calls[0].type, "classifier");
+    assert.equal(calls[0].provider, "typesafe");
+    assert.equal(calls[0].modelId, "jev-latest");
+    assert.deepEqual(calls[1].context.state, { text: "fix it" });
+  } finally {
+    resetWorkflowService();
+  }
+
+  const noRegistry = configureWorkflowService(undefined, { TYPESAFE_API_KEY: "k" });
+  assert.equal(noRegistry.status().configured, false);
+  resetWorkflowService();
+});
+
+test("writes an optional decision trace", async () => {
+  const tracePath = join(
+    tmpdir(),
+    `pi-system-one-trace-${process.pid}-${Date.now()}.jsonl`,
+  );
+  const previous = process.env.PI_SYSTEM_ONE_TRACE;
+  process.env.PI_SYSTEM_ONE_TRACE = tracePath;
+  try {
+    const { client } = fakeClient({ choice: "fix", confidence: 0.9 });
+    const service = createWorkflowService({ getClient: () => client });
+    await service.decideIntent("trace me");
+    await service.decideIntent("trace me");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const lines = (await readFile(tracePath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    assert.equal(lines.length, 2);
+    assert.deepEqual(
+      lines.map((line) => line.cached).sort(),
+      [false, true],
+    );
+    assert.ok(lines.every((line) => line.ok === true));
+  } finally {
+    if (previous === undefined) delete process.env.PI_SYSTEM_ONE_TRACE;
+    else process.env.PI_SYSTEM_ONE_TRACE = previous;
+    await rm(tracePath, { force: true });
+  }
 });

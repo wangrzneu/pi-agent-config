@@ -418,12 +418,41 @@ export class ExternalMemory {
     };
   }
 
+  /** Read one archive and return a bounded evidence excerpt when it matches. */
+  async #evidenceFromArchive(
+    sessionId: string,
+    fileName: string,
+    since: Date | undefined,
+    terms: string[],
+  ): Promise<MemoryEvidence | undefined> {
+    try {
+      const body = await this.#store.readFile(join(this.#sessionDir(sessionId), fileName));
+      const parsed = parseArchiveDocument(body);
+      if (!parsed) {
+        this.#diag(`Malformed archive skipped during recall: ${sessionId}/${fileName}`);
+        return undefined;
+      }
+      const matches = parsed.records.filter((record) => {
+        if (since && new Date(record.timestamp).getTime() < since.getTime()) return false;
+        return recordMatches(record, terms);
+      });
+      if (matches.length === 0) return undefined;
+      return renderEvidence(parsed.header, sessionId, matches, fileName);
+    } catch (error) {
+      this.#diag(`Archive unavailable during recall: ${sessionId}/${fileName}`);
+      return undefined;
+    }
+  }
+
   /**
    * Lazy two-stage recall without a persisted index.
    * 1. List small checkpoint files for the current project.
    * 2. Rank checkpoints by query, paths, symbols, timestamps, recency.
    * 3. Read only archive files referenced by the best candidates.
-   * 4. Rank matching records; return bounded excerpts with provenance.
+   * 4. If nothing matched, scan unreferenced archives directly. This covers
+   *    sessions that were captured at shutdown or explicitly but never
+   *    compacted, so no checkpoint exists.
+   * 5. Return bounded excerpts with provenance.
    */
   async recall(query: RecallQuery): Promise<MemoryEvidence[]> {
     if (!this.#config.project.enabled) return [];
@@ -434,6 +463,8 @@ export class ExternalMemory {
 
     const projectDir = this.#projectDir();
     const sessionDirs = await this.#listSessionDirs(projectDir);
+    if (sessionDirs.length === 0) return [];
+
     const candidates: { checkpoint: CheckpointDocument; sessionId: string; fileName: string }[] = [];
 
     for (const sessionId of sessionDirs) {
@@ -448,45 +479,78 @@ export class ExternalMemory {
       }
     }
 
-    if (candidates.length === 0) return [];
-
     const terms = queryTerms(query.query);
     const rankedCheckpoints = rankCheckpointCandidates(candidates, terms, since, MAX_CHECKPOINT_CANDIDATES);
 
     const evidence: MemoryEvidence[] = [];
     let budget = maxCharacters;
+    const scanned = new Set<string>();
 
     for (const candidate of rankedCheckpoints) {
-      const sessionDir = join(this.#projectDir(), "sessions", candidate.sessionId);
       const archiveFiles = candidate.checkpoint.archiveFiles.slice(
         0,
         MAX_ARCHIVES_PER_CANDIDATE,
       );
       for (const fileName of archiveFiles) {
         if (evidence.length >= maxResults || budget <= 0) break;
-        try {
-          const body = await this.#store.readFile(join(sessionDir, fileName));
-          const parsed = parseArchiveDocument(body);
-          if (!parsed) {
-            this.#diag(`Malformed archive skipped during recall: ${candidate.sessionId}/${fileName}`);
-            continue;
-          }
-          const matches = parsed.records.filter((record) => {
-            if (since && new Date(record.timestamp).getTime() < since.getTime()) return false;
-            return recordMatches(record, terms);
-          });
-          if (matches.length === 0) continue;
-          const excerpt = renderEvidence(parsed.header, candidate.sessionId, matches, fileName);
-          const size = Buffer.byteLength(excerpt.content, "utf8");
-          if (budget - size < 0 && evidence.length > 0) break;
-          budget -= size;
-          evidence.push(excerpt);
-          if (evidence.length >= maxResults) break;
-        } catch (error) {
-          this.#diag(`Archive unavailable during recall: ${candidate.sessionId}/${fileName}`);
-        }
+        const key = `${candidate.sessionId}/${fileName}`;
+        scanned.add(key);
+        const excerpt = await this.#evidenceFromArchive(
+          candidate.sessionId,
+          fileName,
+          since,
+          terms,
+        );
+        if (!excerpt) continue;
+        const size = Buffer.byteLength(excerpt.content, "utf8");
+        if (budget - size < 0 && evidence.length > 0) break;
+        budget -= size;
+        evidence.push(excerpt);
+        if (evidence.length >= maxResults) break;
       }
       if (evidence.length >= maxResults) break;
+    }
+
+    // No checkpoint produced evidence. Scan archives directly, including
+    // sessions that never compacted.
+    if (evidence.length === 0) {
+      const archiveCandidates: {
+        sessionId: string;
+        fileName: string;
+        createdAt: string;
+      }[] = [];
+      for (const sessionId of sessionDirs) {
+        const dir = join(projectDir, "sessions", sessionId);
+        const archives = await this.#store.discoverArchives(dir);
+        for (const archive of archives) {
+          const key = `${sessionId}/${archive.fileName}`;
+          if (scanned.has(key)) continue;
+          archiveCandidates.push({
+            sessionId,
+            fileName: archive.fileName,
+            createdAt: archive.header.createdAt,
+          });
+        }
+      }
+      archiveCandidates.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const boundedCandidates = archiveCandidates.slice(
+        0,
+        MAX_CHECKPOINT_CANDIDATES * MAX_ARCHIVES_PER_CANDIDATE,
+      );
+      for (const candidate of boundedCandidates) {
+        if (evidence.length >= maxResults || budget <= 0) break;
+        const excerpt = await this.#evidenceFromArchive(
+          candidate.sessionId,
+          candidate.fileName,
+          since,
+          terms,
+        );
+        if (!excerpt) continue;
+        const size = Buffer.byteLength(excerpt.content, "utf8");
+        if (budget - size < 0 && evidence.length > 0) break;
+        budget -= size;
+        evidence.push(excerpt);
+      }
     }
 
     return evidence.slice(0, maxResults);

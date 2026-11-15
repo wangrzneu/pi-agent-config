@@ -1,18 +1,25 @@
 #!/usr/bin/env node
 /**
- * Calibrate the three System One decision thresholds against the real API.
+ * Calibrate the three System One decision thresholds through Pi's classifier
+ * registry.
  *
  * Usage:
  *   TYPESAFE_API_KEY=... node --experimental-strip-types scripts/calibrate-system-one.mjs
  *
- * Optional: TYPESAFE_BASE_URL, TYPESAFE_DEFAULT_MODEL, PI_SYSTEM_ONE_MIN_CONFIDENCE[_INTENT|_RISK|_COMPLETION].
+ * `TYPESAFE_API_KEY` may be omitted when the classifier provider is already
+ * configured in Pi (for example through `/login` or `models.json`).
+ *
+ * Optional: PI_SYSTEM_ONE_PROVIDER, PI_SYSTEM_ONE_MODEL (or
+ * TYPESAFE_DEFAULT_MODEL), PI_SYSTEM_ONE_MIN_CONFIDENCE[_INTENT|_RISK|_COMPLETION].
  *
  * Prints, per decision: accuracy, confidence buckets (does higher confidence
  * mean higher accuracy?), the lowest threshold whose confident decisions meet
  * the target accuracy, and the matching PI_SYSTEM_ONE_MIN_CONFIDENCE_* exports.
  */
 
-import { createSystemOneClient } from "../extensions/system-one/client.ts";
+import { createAgentSessionServices } from "@earendil-works/pi-coding-agent";
+
+import { createRegistrySystemOneClient } from "../extensions/system-one/client.ts";
 import { readSystemOneConfig, SYSTEM_ONE_DEFAULTS } from "../extensions/system-one/config.ts";
 import {
   CALIBRATION_CASES,
@@ -24,21 +31,48 @@ import {
 
 const TARGET_ACCURACY = Number(process.env.PI_SYSTEM_ONE_CALIBRATION_TARGET ?? 0.9);
 
-const config = readSystemOneConfig();
-const client = createSystemOneClient();
-
-if (!config || !client) {
+const config = readSystemOneConfig(process.env, { requireApiKey: false });
+if (!config) {
   console.error(
     [
       "System One is not configured.",
-      "Set TYPESAFE_API_KEY (and optionally TYPESAFE_BASE_URL / TYPESAFE_DEFAULT_MODEL), then rerun:",
+      "Set TYPESAFE_API_KEY, configure the classifier provider in Pi, or set PI_SYSTEM_ONE_ENABLED=1.",
       "  TYPESAFE_API_KEY=... node --experimental-strip-types scripts/calibrate-system-one.mjs",
     ].join("\n"),
   );
   process.exit(1);
 }
 
-console.log(`endpoint: ${config.baseUrl}/v1/systemone`);
+const services = await createAgentSessionServices({ cwd: process.cwd() });
+
+// Check credentials before running every fixture. `getModelOfType()` only
+// proves the catalog entry exists; `getAvailableOfType()` also resolves auth.
+const available = await services.modelRuntime.getAvailableOfType(
+  "classifier",
+  config.provider,
+);
+const registry = {
+  getModelOfType(_type, _provider, modelId) {
+    return available.find((model) => model.id === modelId);
+  },
+  classify(model, context, options) {
+    return services.modelRuntime.classify(model, context, options);
+  },
+};
+const client = createRegistrySystemOneClient(registry, config);
+
+if (!client) {
+  console.error(
+    [
+      `No authenticated classifier model found for ${config.provider}/${config.model}.`,
+      "Check that the provider is configured in Pi, or set",
+      "PI_SYSTEM_ONE_PROVIDER / PI_SYSTEM_ONE_MODEL (or TYPESAFE_DEFAULT_MODEL).",
+    ].join("\n"),
+  );
+  process.exit(1);
+}
+
+console.log(`provider: ${config.provider}`);
 console.log(`model:    ${config.model}`);
 console.log(`cases:    ${CALIBRATION_CASES.length} (target accuracy ${TARGET_ACCURACY})`);
 

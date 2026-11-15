@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  buildDecisionBody,
-  buildNoulBody,
-  createHttpSystemOneClient,
+  buildChoiceContext,
+  buildNoulContext,
+  createRegistrySystemOneClient,
   createSystemOneClient,
-  parseDecisionResponse,
-  parseNoulResponse,
+  parseDecisionResult,
+  parseNoulResult,
+  STATE_FIELD,
 } from "./client.ts";
-import { readSystemOneConfig, SYSTEM_ONE_DEFAULTS, systemOneUrl } from "./config.ts";
+import { readSystemOneConfig, SYSTEM_ONE_DEFAULTS } from "./config.ts";
 
 const QUESTION = {
   id: "pi.workflow_intent.v1",
@@ -24,191 +25,268 @@ const QUESTION = {
   },
 };
 
-function response(choice, confidence, probabilities) {
-  return new Response(
-    JSON.stringify({
-      model: "jev-latest",
-      usage: { input_tokens: 10, output_tokens: 2 },
-      answers: {
-        [QUESTION.id]: { type: "choice", choice, confidence, probabilities },
-      },
-    }),
-    { status: 200 },
-  );
+function classifierResult(answers, stopReason = "stop") {
+  return {
+    api: "typesafe-system-one",
+    provider: "typesafe",
+    model: "jev-latest",
+    answers,
+    stopReason,
+    timestamp: 0,
+  };
 }
 
-test("builds the real /v1/systemone request body", () => {
-  const body = buildDecisionBody(
-    { question: QUESTION, state: "x".repeat(100), maxStateCharacters: 10 },
-    "jev-latest",
-  );
-  assert.equal(body.state.length, 10);
-  assert.equal(body.model, "jev-latest");
-  assert.deepEqual(body.questions, {
+function fakeRegistry({ model = { id: "jev-latest" }, result } = {}) {
+  const calls = { models: [], classify: [] };
+  return {
+    calls,
+    registry: {
+      getModelOfType(type, provider, modelId) {
+        calls.models.push({ type, provider, modelId });
+        return model;
+      },
+      async classify(selected, context, options) {
+        calls.classify.push({ model: selected, context, options });
+        return result;
+      },
+    },
+  };
+}
+
+function config(overrides = {}) {
+  return {
+    ...readSystemOneConfig({ TYPESAFE_API_KEY: "k" }),
+    ...overrides,
+  };
+}
+
+test("maps a choice decision to one Pi classifier question", async () => {
+  const { registry, calls } = fakeRegistry({
+    result: classifierResult({
+      [QUESTION.id]: {
+        type: "choice",
+        choice: "fix",
+        confidence: 0.8,
+        probabilities: { fix: 0.8, review: 0.2, other: 0.0 },
+      },
+    }),
+  });
+  const client = createRegistrySystemOneClient(registry, config());
+  assert.ok(client);
+
+  const result = await client.decide({
+    question: QUESTION,
+    state: "x".repeat(100),
+    maxStateCharacters: 10,
+  });
+
+  assert.deepEqual(result, {
+    choice: "fix",
+    confidence: 0.8,
+    probabilities: { fix: 0.8, review: 0.2 },
+  });
+  assert.deepEqual(calls.models[0], {
+    type: "classifier",
+    provider: "typesafe",
+    modelId: "jev-latest",
+  });
+  assert.deepEqual(calls.classify[0].context.state, {
+    [STATE_FIELD]: "x".repeat(10),
+  });
+  assert.deepEqual(calls.classify[0].context.questions, {
     [QUESTION.id]: {
       type: "choice",
       instructions: QUESTION.instructions,
       criteria: QUESTION.criteria,
     },
   });
-  // No schema/options keys from the old hypothesized contract.
-  assert.equal("options" in body, false);
-  assert.equal("schema" in body, false);
+  assert.ok(calls.classify[0].options.signal instanceof AbortSignal);
 });
 
-test("parses the answers map and validates the choice", () => {
+test("maps noul questions to bool questions with default criteria", async () => {
+  const { registry, calls } = fakeRegistry({
+    result: classifierResult({
+      q0: { type: "bool", probability: 0.77 },
+      q1: { type: "bool", probability: 0.12 },
+    }),
+  });
+  const client = createRegistrySystemOneClient(registry, config());
+  assert.ok(client);
+
+  const result = await client.assessNoul({
+    questions: [
+      { id: "q0", instructions: "is a?" },
+      { id: "q1", instructions: "is b?", criteria: { true: "yes", false: "no" } },
+    ],
+    state: "task",
+    maxStateCharacters: 2,
+  });
+
+  assert.deepEqual(result, { probabilities: { q0: 0.77, q1: 0.12 } });
+  assert.deepEqual(calls.classify[0].context.state, {
+    [STATE_FIELD]: "ta",
+  });
+  assert.deepEqual(calls.classify[0].context.questions.q0, {
+    type: "bool",
+    instructions: "is a?",
+    criteria: {
+      true: "The statement is true.",
+      false: "The statement is false.",
+    },
+  });
+  assert.deepEqual(calls.classify[0].context.questions.q1.criteria, {
+    true: "yes",
+    false: "no",
+  });
+});
+
+test("parses and validates a choice result", () => {
+  const withAnswer = (answer) => classifierResult({ [QUESTION.id]: answer });
+
   assert.deepEqual(
-    parseDecisionResponse(
-      { answers: { [QUESTION.id]: { type: "choice", choice: "fix", confidence: 0.8 } } },
+    parseDecisionResult(
+      withAnswer({ type: "choice", choice: "fix", confidence: 0.8 }),
       QUESTION,
     ),
     { choice: "fix", confidence: 0.8 },
   );
   assert.deepEqual(
-    parseDecisionResponse(
-      {
-        answers: {
-          [QUESTION.id]: {
-            type: "choice",
-            choice: "fix",
-            confidence: 0.8,
-            probabilities: { fix: 0.8, review: 0.2, other: 0.0 },
-          },
-        },
-      },
+    parseDecisionResult(
+      withAnswer({
+        type: "choice",
+        choice: "fix",
+        confidence: 0.8,
+        probabilities: { fix: 0.8, review: 0.2, other: 0.0 },
+      }),
       QUESTION,
     ),
     { choice: "fix", confidence: 0.8, probabilities: { fix: 0.8, review: 0.2 } },
   );
-});
 
-test("builds a multi-noul request body", () => {
-  const body = buildNoulBody(
-    {
-      questions: [
-        { id: "q0", instructions: "is a?" },
-        { id: "q1", instructions: "is b?", criteria: { true: "yes", false: "no" } },
-      ],
-      state: "task",
-      maxStateCharacters: 2,
-    },
-    "jev-latest",
+  assert.equal(
+    parseDecisionResult(withAnswer({ type: "choice", choice: "refactor", confidence: 1 }), QUESTION),
+    undefined,
   );
-  assert.equal(body.state, "ta");
-  assert.deepEqual(body.questions.q0, { type: "noul", instructions: "is a?" });
-  assert.deepEqual(body.questions.q1, {
-    type: "noul",
-    instructions: "is b?",
-    criteria: { true: "yes", false: "no" },
-  });
+  assert.equal(
+    parseDecisionResult(withAnswer({ type: "choice", choice: "fix", confidence: 1.5 }), QUESTION),
+    undefined,
+  );
+  assert.equal(
+    parseDecisionResult(withAnswer({ type: "choice", choice: "fix" }), QUESTION),
+    undefined,
+  );
+  assert.equal(
+    parseDecisionResult(withAnswer({ type: "bool", probability: 0.9 }), QUESTION),
+    undefined,
+  );
+  assert.equal(parseDecisionResult(classifierResult({}, "error"), QUESTION), undefined);
+  assert.equal(parseDecisionResult(undefined, QUESTION), undefined);
 });
 
-test("requires every noul answer to be valid", () => {
-  const payload = {
-    answers: {
-      q0: { type: "noul", noul: 0.9 },
-      q1: { type: "noul", noul: 2 },
-      q2: { type: "choice", choice: "x", confidence: 1 },
-    },
-  };
+test("requires every noul answer to be a valid bool", () => {
+  const result = classifierResult({
+    q0: { type: "bool", probability: 0.9 },
+    q1: { type: "bool", probability: 2 },
+    q2: { type: "choice", choice: "x", confidence: 1 },
+  });
   // q1/q2 are invalid, so the whole assessment is rejected rather than silently
   // scoring those candidates as 0.
-  assert.equal(parseNoulResponse(payload, ["q0", "q1"]), undefined);
-  assert.equal(parseNoulResponse(payload, ["q0", "q2"]), undefined);
-  assert.deepEqual(parseNoulResponse(payload, ["q0"]), {
+  assert.equal(parseNoulResult(result, ["q0", "q1"]), undefined);
+  assert.equal(parseNoulResult(result, ["q0", "q2"]), undefined);
+  assert.deepEqual(parseNoulResult(result, ["q0"]), {
     probabilities: { q0: 0.9 },
   });
-  assert.equal(parseNoulResponse({ answers: {} }, ["q0"]), undefined);
-  assert.equal(parseNoulResponse(null, ["q0"]), undefined);
-  assert.equal(parseNoulResponse({ answers: {} }, []), undefined);
+  assert.equal(parseNoulResult(classifierResult({}), ["q0"]), undefined);
+  assert.equal(parseNoulResult(undefined, ["q0"]), undefined);
+  assert.equal(parseNoulResult(result, []), undefined);
+  assert.equal(parseNoulResult(classifierResult({}, "aborted"), ["q0"]), undefined);
 });
 
-test("assessNoul posts noul questions and parses the answers", async () => {
-  const config = readSystemOneConfig({ TYPESAFE_API_KEY: "k" });
-  const client = createHttpSystemOneClient(config, async (_url, init) => {
-    assert.equal(JSON.parse(init.body).questions.q0.type, "noul");
-    return new Response(
-      JSON.stringify({ answers: { q0: { type: "noul", noul: 0.77 } } }),
-      { status: 200 },
-    );
+test("fails open when the model is absent or the result is an error", async () => {
+  const missing = fakeRegistry({ model: null });
+  assert.equal(createRegistrySystemOneClient(missing.registry, config()), undefined);
+
+  const { registry } = fakeRegistry({
+    result: classifierResult({}, "error"),
   });
-  assert.deepEqual(
-    await client.assessNoul({
-      questions: [{ id: "q0", instructions: "is a?" }],
-      state: "task",
+  const client = createRegistrySystemOneClient(registry, config());
+  assert.ok(client);
+  assert.equal(await client.decide({ question: QUESTION, state: "x" }), undefined);
+  assert.equal(
+    await client.assessNoul({ questions: [{ id: "q0", instructions: "?" }], state: "x" }),
+    undefined,
+  );
+});
+
+test("a throwing custom registry also fails open", async () => {
+  const registry = {
+    getModelOfType() {
+      return { id: "jev-latest" };
+    },
+    async classify() {
+      throw new Error("registry down");
+    },
+  };
+  const client = createRegistrySystemOneClient(registry, config());
+  assert.ok(client);
+  assert.equal(await client.decide({ question: QUESTION, state: "x" }), undefined);
+});
+
+test("context builders expose only the bounded state and the questions", () => {
+  const choice = buildChoiceContext({
+    question: QUESTION,
+    state: "state",
+    maxStateCharacters: 3,
+  });
+  assert.deepEqual(choice.state, { [STATE_FIELD]: "sta" });
+  assert.deepEqual(Object.keys(choice.questions), [QUESTION.id]);
+
+  const noul = buildNoulContext({
+    questions: [{ id: "q0", instructions: "?" }],
+    state: "state",
+    maxStateCharacters: 2,
+  });
+  assert.deepEqual(noul.state, { [STATE_FIELD]: "st" });
+  assert.deepEqual(noul.questions.q0.criteria, {
+    true: "The statement is true.",
+    false: "The statement is false.",
+  });
+});
+
+test("client is only created when configured", () => {
+  const { registry } = fakeRegistry();
+  assert.equal(createSystemOneClient(registry, {}), undefined);
+  assert.ok(createSystemOneClient(registry, { TYPESAFE_API_KEY: "k" }));
+  assert.ok(createSystemOneClient(registry, { PI_SYSTEM_ONE_ENABLED: "1" }));
+  assert.equal(
+    createSystemOneClient(registry, {
+      TYPESAFE_API_KEY: "k",
+      PI_SYSTEM_ONE_ENABLED: "0",
     }),
-    { probabilities: { q0: 0.77 } },
+    undefined,
   );
-});
-test("rejects off-schema or malformed answers", () => {
-  const withAnswer = (answer) => ({ answers: { [QUESTION.id]: answer } });
-  assert.equal(parseDecisionResponse(withAnswer({ type: "choice", choice: "refactor", confidence: 1 }), QUESTION), undefined);
-  assert.equal(parseDecisionResponse(withAnswer({ type: "choice", choice: "fix", confidence: 1.5 }), QUESTION), undefined);
-  assert.equal(parseDecisionResponse(withAnswer({ type: "choice", choice: "fix" }), QUESTION), undefined);
-  assert.equal(parseDecisionResponse(withAnswer({ type: "noul", noul: 0.9 }), QUESTION), undefined);
-  assert.equal(parseDecisionResponse({ answers: {} }, QUESTION), undefined);
-  assert.equal(parseDecisionResponse({}, QUESTION), undefined);
-  assert.equal(parseDecisionResponse(null, QUESTION), undefined);
-});
-
-test("posts to /v1/systemone with bearer auth and fails open on errors", async () => {
-  const config = readSystemOneConfig({ TYPESAFE_API_KEY: "tsk-test" });
-  assert.ok(config);
-  assert.equal(systemOneUrl(config.baseUrl), "https://api.typesafe.ai/v1/systemone");
-
-  let seenUrl;
-  let seenInit;
-  const ok = createHttpSystemOneClient(config, async (url, init) => {
-    seenUrl = url;
-    seenInit = init;
-    return response("fix", 0.9);
-  });
-  assert.deepEqual(await ok.decide({ question: QUESTION, state: "fix the test" }), {
-    choice: "fix",
-    confidence: 0.9,
-  });
-  assert.equal(seenUrl, "https://api.typesafe.ai/v1/systemone");
-  assert.equal(seenInit.method, "POST");
-  assert.equal(seenInit.headers.authorization, "Bearer tsk-test");
-  assert.equal(JSON.parse(seenInit.body).questions[QUESTION.id].type, "choice");
-
-  const httpError = createHttpSystemOneClient(config, async () => new Response("nope", { status: 500 }));
-  assert.equal(await httpError.decide({ question: QUESTION, state: "x" }), undefined);
-
-  const throws = createHttpSystemOneClient(config, async () => {
-    throw new Error("network down");
-  });
-  assert.equal(await throws.decide({ question: QUESTION, state: "x" }), undefined);
-
-  const badJson = createHttpSystemOneClient(config, async () => new Response("{not json", { status: 200 }));
-  assert.equal(await badJson.decide({ question: QUESTION, state: "x" }), undefined);
-});
-
-test("client is only created when TYPESAFE_API_KEY is set", () => {
-  assert.equal(createSystemOneClient({}), undefined);
   assert.ok(
-    createSystemOneClient({ TYPESAFE_API_KEY: "k" }, async () => new Response("{}")),
+    createSystemOneClient(registry, {}, { requireApiKey: false }),
   );
 });
 
-test("config uses SDK env names, defaults, and per-decision thresholds", () => {
+test("config selects the provider/model and parses thresholds", () => {
   const defaults = readSystemOneConfig({ TYPESAFE_API_KEY: "k" });
-  assert.equal(defaults.baseUrl, SYSTEM_ONE_DEFAULTS.baseUrl);
+  assert.equal(defaults.provider, SYSTEM_ONE_DEFAULTS.provider);
   assert.equal(defaults.model, SYSTEM_ONE_DEFAULTS.model);
   assert.equal(defaults.timeoutMs, SYSTEM_ONE_DEFAULTS.timeoutMs);
   assert.deepEqual(defaults.thresholds, SYSTEM_ONE_DEFAULTS.thresholds);
 
   const custom = readSystemOneConfig({
     TYPESAFE_API_KEY: "  k  ",
-    TYPESAFE_BASE_URL: "https://example.test/",
-    TYPESAFE_DEFAULT_MODEL: "  custom-model  ",
+    PI_SYSTEM_ONE_PROVIDER: "  openrouter  ",
+    PI_SYSTEM_ONE_MODEL: "  typesafe/jev-1.14  ",
     PI_SYSTEM_ONE_TIMEOUT_MS: "999999",
     PI_SYSTEM_ONE_MIN_CONFIDENCE: "0.7",
     PI_SYSTEM_ONE_MIN_CONFIDENCE_RISK: "0.9",
   });
-  assert.equal(custom.apiKey, "k");
-  assert.equal(custom.baseUrl, "https://example.test");
-  assert.equal(custom.model, "custom-model");
+  assert.equal(custom.provider, "openrouter");
+  assert.equal(custom.model, "typesafe/jev-1.14");
   assert.equal(custom.timeoutMs, 30_000);
   assert.deepEqual(custom.thresholds, {
     intent: 0.7,
@@ -216,6 +294,13 @@ test("config uses SDK env names, defaults, and per-decision thresholds", () => {
     completion: 0.7,
     context: 0.7,
   });
+
+  // The legacy model variable still works when the new one is absent.
+  const legacy = readSystemOneConfig({
+    TYPESAFE_API_KEY: "k",
+    TYPESAFE_DEFAULT_MODEL: "  jev-preview  ",
+  });
+  assert.equal(legacy.model, "jev-preview");
 
   const clamped = readSystemOneConfig({
     TYPESAFE_API_KEY: "k",
@@ -225,4 +310,6 @@ test("config uses SDK env names, defaults, and per-decision thresholds", () => {
 
   assert.equal(readSystemOneConfig({}), undefined);
   assert.equal(readSystemOneConfig({ TYPESAFE_API_KEY: "   " }), undefined);
+  assert.equal(readSystemOneConfig({ PI_SYSTEM_ONE_ENABLED: "1" }).provider, "typesafe");
+  assert.ok(readSystemOneConfig({}, { requireApiKey: false }));
 });

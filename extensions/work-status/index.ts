@@ -13,6 +13,7 @@ import { isPlanModeActive } from "./plan-mode-state.ts";
 import {
   WORK_TYPE_LABELS,
   describeToolActivity,
+  heuristicWorkClassification,
   summarizeWork,
   type WorkActivity,
   type WorkType,
@@ -77,6 +78,8 @@ export function registerWorkStatus(
   classifyWork: ClassifyWork,
 ) {
   let current: CurrentWork | undefined;
+  let generation = 0;
+  const modelClassifierEnabled = process.env.PI_WORK_STATUS_CLASSIFIER !== "0";
   const activeTools = new Map<string, WorkActivity>();
 
   const render = (ctx: any, activity?: WorkActivity) => {
@@ -97,6 +100,7 @@ export function registerWorkStatus(
   const clear = (ctx: any) => {
     activeTools.clear();
     current = undefined;
+    generation += 1;
     if (!ctx.hasUI) return;
     ctx.ui.setStatus(STATUS_KEY, undefined);
     ctx.ui.setWorkingMessage();
@@ -107,15 +111,32 @@ export function registerWorkStatus(
     if (ctx.mode !== "tui") return;
 
     const prompt = String(event.prompt ?? "");
-    const classification: WorkClassification | undefined =
-      await classifyWork(prompt, ctx);
-    if (!classification) return;
+    if (!prompt.trim()) return;
 
+    // Render a local heuristic immediately. The model classifier, when
+    // enabled, only refines the footer after the turn has started.
+    const fallback = heuristicWorkClassification(prompt);
     current = {
-      type: isPlanModeActive() ? "plan" : classification.type,
-      summary: classification.summary,
+      type: isPlanModeActive() ? "plan" : fallback.type,
+      summary: fallback.summary,
     };
     render(ctx);
+
+    if (!modelClassifierEnabled) return;
+    const requestedGeneration = generation;
+    void classifyWork(prompt, ctx)
+      .then((classification) => {
+        if (!classification || requestedGeneration !== generation) return;
+        current = {
+          type: isPlanModeActive() ? "plan" : classification.type,
+          summary: classification.summary,
+        };
+        // Do not overwrite a tool detail that started while the classifier ran.
+        render(ctx, Array.from(activeTools.values()).at(-1));
+      })
+      .catch(() => {
+        // The heuristic remains visible; classification is best-effort.
+      });
   });
 
   pi.on("tool_execution_start", async (event, ctx) => {

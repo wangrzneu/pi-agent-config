@@ -15,8 +15,8 @@ unstructured state in  →  typed probabilistic decision out
 |---|---|---|---|---|
 | Workflow routing | `before_agent_start` | `choice` | fail-open | hidden `[WORKFLOW]` hint → on-demand prompt |
 | Change-risk triage | after `edit` / `write` | `choice` | fail-safe | hidden `[RISK]` hint before the next call |
-| Completion self-check | `agent_end` (files changed) | `choice` | fail-safe | one extra verification pass (≤ once per user turn) |
-| Context selection | `context_select` tool | `noul` | threshold + top-K | ranks candidate files by relevance |
+| Completion self-check | `agent_before_settle` (files changed) | `choice` | fail-safe | one extra verification pass (≤ once per user turn) |
+| Context selection | `context_select` tool | `noul` → Pi `bool` | threshold + top-K | ranks candidate files by relevance |
 
 ## What it does
 
@@ -30,7 +30,8 @@ configured confidence threshold it injects a hidden message such as:
 ```
 
 The hint is a **behavior preference** (README design principle #2): it never
-blocks tools and never widens permissions. The intent→workflow mapping lives in
+blocks tools and never widens permissions. Only the newest workflow hint is
+kept in context, so a long session does not accumulate stale intent messages. The intent→workflow mapping lives in
 `extensions/system-one/routing.ts` and is pure and deterministic.
 
 | Intent | Prompt | Suggests planning |
@@ -54,11 +55,12 @@ classifier — so there is still exactly one request per turn either way.
 
 ### Change-risk triage
 
-A second decision reuses the same service. Each proposed `edit`/`write` is
-triaged before it is applied (`pi.change_risk.v1`, choices
-`low | medium | high`); when the change looks risky, a hidden `[RISK]` hint is
-injected at the next LLM call via the `context` event. It **never blocks a
-tool** — escalation is attention, not a hard constraint.
+A second decision reuses the same service. Proposed `edit`/`write` calls are
+queued and triaged once per model request (`pi.change_risk.v1`, choices
+`low | medium | high`); parallel edits are combined rather than overwriting each
+other. When the change looks risky, a hidden `[RISK]` hint is injected at the
+next LLM call via the `context` event. It **never blocks a tool** — escalation
+is attention, not a hard constraint.
 
 | Decision | Policy |
 |---|---|
@@ -76,7 +78,9 @@ nothing.
 
 A third decision guards the end of a turn. When a turn changed files, the
 extension asks whether the request is actually satisfied and verified
-(`pi.completion_check.v1`, choices `verified | unverified | incomplete`).
+(`pi.completion_check.v1`, choices `verified | unverified | incomplete`). It
+uses Pi's `agent_before_settle` boundary and returns one `custom_message` draft
+with `continue: true`, instead of scheduling a turn from `agent_end`.
 
 | Decision | Policy |
 |---|---|
@@ -85,19 +89,19 @@ extension asks whether the request is actually satisfied and verified
 | `incomplete` (confident) | One hidden `[SELF-CHECK]` pass: address the request |
 | Uncertain (below threshold) | **Fail safe**: one verification pass |
 
-The pass is delivered with `pi.sendMessage(..., { triggerTurn: true })`, deferred
-past the agent loop so it never re-enters it from inside `agent_end`. It runs **at
-most once per user turn** (a genuine user prompt resets the budget; the
-extension-triggered pass does not emit `before_agent_start`, so it cannot loop).
+The pass is delivered as one `custom_message` draft from
+`agent_before_settle`. It runs **at most once per user turn**: a genuine user
+prompt resets the budget, while the extension-triggered pass has
+`messageType: "custom"` and does not reset it.
 Turns that changed no files are skipped entirely.
 
 ### Context selection
 
 A `context_select` tool (registered only when System One is configured) ranks a
-candidate list by relevance to a task. It uses the **`noul`** primitive to ask one
-yes/no question per candidate in a single request — the "many independent,
-decomposed questions" pattern — then applies a deterministic threshold + top-K
-policy (`extensions/system-one/context.ts`).
+candidate list by relevance to a task. It maps the extension's **`noul`** question
+to Pi's `bool` primitive: one yes/no question per candidate in a single request —
+the "many independent, decomposed questions" pattern — then applies a
+deterministic threshold + top-K policy (`extensions/system-one/context.ts`).
 
 ```
 context_select(task: "add login", candidates: ["src/auth.ts", "src/ui/button.tsx", ...])
@@ -121,87 +125,88 @@ context_select(task: "add login", candidates: ["src/auth.ts", "src/ui/button.tsx
 
 ## Enabling
 
-Disabled by default. Set `TYPESAFE_API_KEY` (the SDK's own env var):
+Disabled by default. `TYPESAFE_API_KEY` is the convenience opt-in for the
+`typesafe` provider; `PI_SYSTEM_ONE_ENABLED=1` enables the extension for a
+classifier that Pi already knows about (for example through `/login` or
+`models.json`).
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TYPESAFE_API_KEY` | — | API key. Required; without it the extension is inert. |
-| `TYPESAFE_BASE_URL` | `https://api.typesafe.ai` | API base URL. |
-| `TYPESAFE_DEFAULT_MODEL` | `jev-latest` | Model name or alias. |
+| `TYPESAFE_API_KEY` | — | Convenience opt-in for the `typesafe` provider. Without it, set `PI_SYSTEM_ONE_ENABLED=1` for a provider configured in Pi. |
+| `PI_SYSTEM_ONE_ENABLED` | — | `0` disables; `1` enables without requiring `TYPESAFE_API_KEY`. |
+| `PI_SYSTEM_ONE_PROVIDER` | `typesafe` | Pi classifier provider. |
+| `PI_SYSTEM_ONE_MODEL` | `jev-latest` | Classifier model id. `TYPESAFE_DEFAULT_MODEL` is a backward-compatible alias. |
 | `PI_SYSTEM_ONE_TIMEOUT_MS` | `5000` | Per-request timeout, clamped to 100–30000. |
 | `PI_SYSTEM_ONE_MIN_CONFIDENCE` | per-decision defaults | Shared minimum confidence; overrides every per-decision default below. |
 | `PI_SYSTEM_ONE_MIN_CONFIDENCE_INTENT` | `0.5` | Workflow-intent threshold. |
 | `PI_SYSTEM_ONE_MIN_CONFIDENCE_RISK` | `0.6` | Change-risk threshold. |
 | `PI_SYSTEM_ONE_MIN_CONFIDENCE_COMPLETION` | `0.6` | Completion threshold. |
 | `PI_SYSTEM_ONE_MIN_CONFIDENCE_CONTEXT` | `0.5` | Context-selection relevance threshold. |
+| `PI_SYSTEM_ONE_TRACE` | — | Optional JSONL path for decision latency/cache/confidence traces. |
+
+The endpoint, credentials, and request format belong to Pi's model registry.
+To use a custom endpoint, configure the selected provider in `models.json`;
+`TYPESAFE_BASE_URL` is no longer read by this extension.
 
 Configuration is re-resolved on each `session_start`, so env changes take effect
 on the next session without a full restart. `/system-one` toggles and inspects
-routing at runtime without touching the env:
+all decision axes at runtime without touching the env:
 
 ```
-/system-one          # status: on/off, configured, endpoint, model
-/system-one off      # stop routing this session
-/system-one on       # resume routing
+/system-one          # status: on/off, configured, provider, model
+/system-one off      # stop routing, risk, completion, and context decisions
+/system-one on       # resume all decisions
 ```
 
-Status never prints the API key. Results are cached per prompt (128 entries) and
-the request is bounded (`MAX_STATE_CHARACTERS = 6000`). Pi awaits
+Status never prints credentials. Results are cached per prompt (128 entries) and
+the request is bounded (`MAX_STATE_CHARACTERS = 6000`). Set
+`PI_SYSTEM_ONE_TRACE` to a file path to record JSONL traces with hook kind,
+latency, cache status, confidence, and success; tracing is best-effort and never
+changes a decision. Pi awaits
 `before_agent_start` handlers before building the turn, so an uncached prompt
 adds up to `PI_SYSTEM_ONE_TIMEOUT_MS` of latency; cached prompts add none.
 
-## Wire contract
+## Classifier request mapping
 
-This is the real `POST /v1/systemone` contract from the public
-[`typesafe_sdk`](https://pypi.org/project/typesafe-sdk/), not a guess. System One
-Models are not chat-completion models, so they do not go through Pi's
-`completeSimple` path.
+The extension does not call the HTTP API directly. It asks Pi's model registry
+for the configured classifier and lets Pi resolve authentication, the endpoint,
+retries, and usage/cost accounting:
 
-```http
-POST <TYPESAFE_BASE_URL>/v1/systemone
-accept: application/json
-content-type: application/json
-authorization: Bearer <TYPESAFE_API_KEY>
-
-{ "model": "jev-latest",
-  "state": "<task prompt / diff, truncated to 6000 chars>",
-  "questions": {
+```ts
+const model = ctx.modelRegistry.getModelOfType(
+  "classifier",
+  config.provider,
+  config.model,
+);
+const result = await ctx.modelRegistry.classify(model, {
+  state: { text: boundedState },
+  questions: {
     "pi.workflow_intent.v1": {
-      "type": "choice",
-      "instructions": "Classify the developer's current task by its dominant intent.",
-      "criteria": { "design": "...", "plan": "...", "fix": "...", "...": "..." }
-    }
-  } }
+      type: "choice",
+      instructions: "Classify the developer's current task by its dominant intent.",
+      criteria: { design: "...", plan: "...", fix: "..." },
+    },
+  },
+}, { signal });
 ```
 
-The API supports three primitives — `noul` (yes/no), `choice`, and `score`
-(rubric). Two are wired: `choice` (a calibrated `confidence`) for the three
-decisions, and `noul` (a probability) for context ranking, which asks one question
-per candidate in a single request. `score` is unused.
+Pi's classifier API supports three primitives — `bool` (yes/no), `choice`, and
+`score` (rubric). This extension maps its two decision types as follows:
 
-```json
-{ "answers": {
-    "candidate_0": { "type": "noul", "noul": 0.94 },
-    "candidate_1": { "type": "noul", "noul": 0.12 } } }
-```
+- `choice` → Pi `choice` (a calibrated `confidence` and optional probabilities).
+- `noul` → Pi `bool` (a probability; both criterion labels are required, so
+  missing labels get neutral defaults).
+- The extension's string state → `{ "text": "<bounded state>" }` because Pi's
+  classifier state must be a JSON object.
 
-```json
-{ "model": "jev-latest",
-  "usage": { "input_tokens": 448, "output_tokens": 55 },
-  "answers": {
-    "pi.workflow_intent.v1": {
-      "type": "choice",
-      "choice": "fix",
-      "confidence": 0.87,
-      "probabilities": { "fix": 0.87, "review": 0.11, "...": 0.0 }
-    }
-  } }
-```
+Context ranking asks one `bool` question per candidate in a single request.
+`score` is unused.
 
-The client requires `answers[<question id>]` to be a `choice` answer, with
-`choice` one of the requested criteria labels and `confidence` a number in
-`[0, 1]`. Anything else is rejected (fail-open). A full error response, a
-missing answer, an unexpected `type`, or an off-schema label all yield
+The client requires `result.stopReason === "stop"`, a `choice` that is one of the
+requested criteria labels, and confidence/probabilities in `[0, 1]`. A `noul`
+assessment requires every requested question to be answered as a valid `bool`.
+Anything else is rejected (fail-open). A missing model, an error or aborted
+result, a missing answer, an unexpected `type`, or an off-schema label all yield
 `undefined`.
 
 ### Calibration
@@ -209,13 +214,17 @@ missing answer, an unexpected `type`, or an off-schema label all yield
 Thresholds are decision-specific and should be calibrated against your own data:
 
 ```bash
+npm run calibrate
+# or, for the `typesafe` provider:
 TYPESAFE_API_KEY=... npm run calibrate
 ```
 
-The runner sends labeled fixtures (`extensions/system-one/calibration.ts`) for
-all three decisions, then prints per-decision accuracy, **confidence buckets**
-(does higher confidence mean higher accuracy?), the lowest threshold whose
-confident decisions meet a target accuracy, and ready-to-paste exports:
+The runner uses Pi's model runtime, so it can also use credentials already stored
+by Pi (for example `/login` or `models.json`). It sends labeled fixtures
+(`extensions/system-one/calibration.ts`) for all three decisions, then prints
+per-decision accuracy, **confidence buckets** (does higher confidence mean higher
+accuracy?), the lowest threshold whose confident decisions meet a target
+accuracy, and ready-to-paste exports:
 
 ```bash
 # example output (this run adopted 0.5 / 0.6 / 0.6)
@@ -270,17 +279,19 @@ miss traces back to its fixture. Thresholds are only as good as the labels. Re-r
 When the model is *unavailable*, every decision returns `undefined` and the
 caller does nothing:
 
-- extension not configured (`TYPESAFE_API_KEY` unset) or `/system-one off`;
+- extension not configured (missing classifier model, no opt-in, or unavailable provider) or `/system-one off`;
 - empty state;
-- transport error, non-2xx response, malformed JSON;
-- off-schema `choice` or out-of-range confidence;
+- classifier result error or abortion;
+- off-schema `choice` or out-of-range confidence/probability;
 - request timeout (merged with the caller's abort signal).
 
 This is separate from the *policy* on a decision that did arrive: routing fails
 open (a low-confidence answer does nothing), while change-risk and completion
-fail safe (a low-confidence answer escalates). An unavailable model never
-blocks or degrades an agent turn. To disable the feature, run
-`/system-one off`, unset `TYPESAFE_API_KEY`, or remove the extension.
+fail safe (a low-confidence answer escalates). An unavailable model never blocks
+a tool or widens permissions, but an uncached routing/risk/completion decision
+can add up to `PI_SYSTEM_ONE_TIMEOUT_MS` of latency at its hook. To disable the
+feature, run `/system-one off`, disable the classifier provider, or remove the
+extension.
 
 ## Boundaries (what this must not do)
 
@@ -311,12 +322,14 @@ blocks or degrades an agent turn. To disable the feature, run
 **Privacy / dependency**
 
 - **Data leaves the machine.** Task prompts, `edit` diffs, the last request plus
-  assistant replies (completion), and candidate paths are sent to
-  `TYPESAFE_BASE_URL`. Treat the endpoint as untrusted for sensitive code: point
-  `TYPESAFE_BASE_URL` at a self-hosted proxy, or run `/system-one off`.
-- **Early-access API.** The wire contract was recovered from the public
-  `typesafe-sdk` 0.7.1; an upstream change requires updating
-  `extensions/system-one/client.ts`.
+  assistant replies (completion), and candidate paths are sent to the endpoint
+  configured for the selected classifier provider in Pi. Treat that endpoint as
+  untrusted for sensitive code: configure a self-hosted provider in `models.json`,
+  or run `/system-one off`.
+- **Classifier API dependency.** The extension now uses Pi's classifier registry;
+  an upstream change to the `bool`/`choice` contract or the provider catalog is
+  handled by Pi, but may still require updating this extension's mapping or
+  selected model.
 
 **Behavioural side effects**
 

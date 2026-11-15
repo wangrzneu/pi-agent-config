@@ -355,6 +355,17 @@ test("recall returns matching evidence with full provenance", async () => {
   });
 });
 
+test("recall falls back to archives when no checkpoint exists", async () => {
+  await withMemory({}, async (mem) => {
+    // Capture at shutdown/explicit boundaries can produce archives without a
+    // compaction checkpoint. They must still be recallable.
+    await mem.capture(snapshot());
+    const results = await mem.recall({ query: "postgres adapter" });
+    assert.ok(results.length >= 1);
+    assert.ok(results.some((result) => result.sourceEntryIds.includes("e002")));
+  });
+});
+
 test("recall is lazy: only checkpoints then referenced archives are opened", async () => {
   const root = await mkdtemp(join(tmpdir(), "em-lazy-"));
   try {

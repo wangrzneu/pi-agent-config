@@ -61,6 +61,7 @@ function createHarness({ root, cwd, entries = BRANCH, confirmResult = true, hasU
   const commands = new Map();
   const tools = [];
   const notifications = [];
+  let activeTools = [];
 
   const pi = {
     on(event, handler) {
@@ -71,8 +72,15 @@ function createHarness({ root, cwd, entries = BRANCH, confirmResult = true, hasU
     },
     registerTool(definition) {
       tools.push(definition);
+      if (definition.defaultActive !== false) activeTools.push(definition.name);
     },
     registerFlag() {},
+    getActiveTools() {
+      return [...activeTools];
+    },
+    setActiveTools(names) {
+      activeTools = [...names];
+    },
   };
 
   const ctx = {
@@ -99,6 +107,7 @@ function createHarness({ root, cwd, entries = BRANCH, confirmResult = true, hasU
     commands,
     tools,
     notifications,
+    getActiveTools: () => [...activeTools],
     ctx,
     start: (reason = "startup") =>
       handlers.get("session_start")({ type: "session_start", reason }, ctx),
@@ -114,6 +123,8 @@ function createHarness({ root, cwd, entries = BRANCH, confirmResult = true, hasU
         },
         ctx,
       ),
+    settled: () =>
+      handlers.get("agent_settled")({ type: "agent_settled", aborted: false }, ctx),
     compact: (reason = "threshold", willRetry = false) =>
       handlers.get("session_compact")(
         {
@@ -233,8 +244,29 @@ test("opt-in with a root enables memory and registers the recall tool", async ()
     await harness.start();
     assert.equal(harness.tools.length, 1);
     assert.equal(harness.tools[0].name, "memory_recall");
+    assert.deepEqual(harness.getActiveTools(), ["memory_recall"]);
     // No proactive writes at session start (no write amplification).
     assert.deepEqual(archivesOf(await tree(root)), []);
+  });
+});
+
+test("opt-in incremental capture records the settled tail", async () => {
+  await withMemoryRoot(async (root, cwd) => {
+    await optIn(cwd);
+    const previous = process.env.PI_AGENT_MEMORY_INCREMENTAL;
+    process.env.PI_AGENT_MEMORY_INCREMENTAL = "1";
+    try {
+      const harness = createHarness({ root, cwd });
+      await harness.start();
+      await harness.settled();
+      assert.equal(archivesOf(await tree(root)).length, 1);
+      // Idempotent: no new entries means no new chunk.
+      await harness.settled();
+      assert.equal(archivesOf(await tree(root)).length, 1);
+    } finally {
+      if (previous === undefined) delete process.env.PI_AGENT_MEMORY_INCREMENTAL;
+      else process.env.PI_AGENT_MEMORY_INCREMENTAL = previous;
+    }
   });
 });
 
@@ -407,6 +439,7 @@ test("/memory off disables future capture but keeps existing files", async () =>
     assert.equal(archivesOf(before).length, 1);
 
     await harness.command("memory", "off");
+    assert.deepEqual(harness.getActiveTools(), []);
     await harness.beforeCompact("manual"); // no-op now
     const after = await tree(root);
     assert.deepEqual(after, before); // no deletions, no growth
@@ -479,5 +512,6 @@ test("memory_recall tool returns bounded evidence only when enabled", async () =
     const text = result.content[0].text.toLowerCase();
     assert.ok(text.includes("postgres adapter"));
     assert.ok(text.includes("session=s1"));
+    assert.deepEqual(result.details, { enabled: true, resultCount: 1 });
   });
 });

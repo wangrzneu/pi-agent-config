@@ -47,6 +47,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | `extensions/system-one/` | Opt-in System One decision client and workflow routing |
 | `skills/pi-workflow/` | Concise default working guidelines |
 | `prompts/` | On-demand prompts for review, debugging, and architecture tasks |
+| `bench/` | Paired A/B runner and analysis for System One |
 | `docs/` | Reference documentation for code exploration, external projects, and security boundaries |
 | `settings.example.json` | Example project-level Pi package configuration |
 
@@ -59,11 +60,11 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 
 | Document | Topic |
 |---|---|
-| `docs/external-memory.md` | Proposed synced-folder external-memory design |
+| `docs/external-memory.md` | Synced-folder external-memory design and behavior |
 | `docs/external-memory-test-plan.md` | Verification plan for external memory |
 | `docs/sandbox.md` | Sandbox behavior, configuration, and security boundaries |
 | `docs/sandbox-design.md` | Architecture and design decisions for the sandbox extension |
-| `docs/sandbox-development-environments.md` | Planned composable language/tool environments, dynamic runtime store, and Kubernetes credential broker |
+| `docs/sandbox-development-environments.md` | Composable language/tool environments, dynamic runtime store, and Kubernetes credential broker |
 | `docs/ssh-tools.md` | SSH tool requirements, behavior, and security boundaries |
 | `docs/security.md` | Security model overview |
 | `docs/claude-code-sandbox.md` | Research: how Claude Code uses sandboxing (primary-source reverse engineering) |
@@ -73,6 +74,8 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | `docs/exploration.md` | Code exploration guidance |
 | `docs/external-projects.md` | Working with external projects |
 | `docs/system-one.md` | System One decisions: routing, change risk, completion self-check, context selection, and calibration |
+| `docs/ab-testing.md` | Paired A/B runner, task schema, metrics, and analysis |
+| `docs/improvement-plan.md` | Review findings and P0/P1/P2/P3 roadmap |
 
 ## 📋 Prerequisites
 
@@ -243,6 +246,13 @@ Run the repository regression tests with:
 npm test
 ```
 
+Run the paired System One A/B harness (see [`docs/ab-testing.md`](docs/ab-testing.md)):
+
+```bash
+node bench/run.mjs --tasks bench/tasks.example.json --model provider/model:high --reps 3
+node bench/analyze.mjs --runs bench/results
+```
+
 ## 🔄 Updating and Removing
 
 ```bash
@@ -264,13 +274,15 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
 - Files in `docs/` are reference material and should not be added to every task's context automatically.
 - Plan mode injects its model reminder only once when the mode is entered; tool interceptors
   continuously enforce the read-only restrictions.
-- Work status uses one short, no-reasoning model request for each uncached task. It consumes a small
-  number of tokens but does not add the result to the session context.
-- Workflow routing is inert unless `TYPESAFE_API_KEY` is set. When enabled, it makes one short
+- Work status renders a local heuristic immediately and, unless `PI_WORK_STATUS_CLASSIFIER=0`, uses
+  one short, no-reasoning model request to refine the footer. The result is not added to the session
+  context.
+- Workflow routing is inert unless a classifier provider is configured (`TYPESAFE_API_KEY`, or
+  `PI_SYSTEM_ONE_ENABLED=1` with a provider already configured in Pi). When enabled, it makes one short
   System One decision request per uncached prompt and injects only a hidden workflow hint; work status
-  reuses that same decision, so a prompt is decided once per session. Each proposed edit is also triaged
-  for change risk, and a risky (or uncertain) change injects a hidden review hint before the next model
-  call. After a turn that changed files, a completion self-check can start one extra verification pass
+  reuses that same decision, so a prompt is decided once per session. Proposed edits are batched and
+  triaged once per model request, and a risky (or uncertain) change injects a hidden review hint before
+  the next model call. After a turn that changed files, a completion self-check can start one extra verification pass
   (at most once per user prompt). A `context_select` tool ranks candidate files by relevance on demand.
   `/system-one on|off` toggles all of it at runtime; configuration is
   re-resolved at session start.
@@ -296,8 +308,8 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
 
 ## 🔒 Security
 
-The local command sandbox limits shell children but does not sandbox Pi's direct file tools, packages,
-or extensions. Plan mode remains only a safeguard against accidental changes. Review package source,
+The local command sandbox limits shell children; Pi's direct file tools have a separate path gate,
+while packages and extension code still run outside the OS sandbox. Plan mode remains only a safeguard against accidental changes. Review package source,
 and use a container, VM, or dedicated low-privilege user for real credentials, production code, or
 hostile projects. See [`docs/security.md`](docs/security.md) for details.
 

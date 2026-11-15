@@ -1,9 +1,15 @@
 /**
- * Configuration for the System One decision client.
+ * Configuration for the System One decision layer.
  *
- * Disabled by default and fully opt-in: nothing runs unless `TYPESAFE_API_KEY`
- * is set. Endpoint, model, and key use the official SDK environment variable
- * names so an existing TypeSafe setup works unchanged.
+ * The extension is opt-in: nothing runs unless a TypeSafe/System One classifier
+ * is configured. `TYPESAFE_API_KEY` enables it with the environment key;
+ * `PI_SYSTEM_ONE_ENABLED=1` enables it for a provider configured through Pi
+ * (for example `/login` or `models.json`). `PI_SYSTEM_ONE_ENABLED=0` always
+ * disables it.
+ *
+ * The actual classifier lookup and request auth are owned by Pi's model
+ * registry (`ctx.modelRegistry`), not by this extension. The provider and model
+ * below select which classifier to ask.
  */
 
 import { DEFAULT_COMPLETION_THRESHOLD } from "./completion.ts";
@@ -15,11 +21,9 @@ import type { DecisionKind } from "./types.ts";
 export type SystemOneThresholds = Record<DecisionKind, number>;
 
 export interface SystemOneConfig {
-  /** API base URL, without a trailing slash. */
-  baseUrl: string;
-  /** Bearer token. Never enters status output or logs. */
-  apiKey: string;
-  /** Model name or alias, e.g. `jev-latest`. */
+  /** Pi provider that exposes the classifier, e.g. `typesafe`. */
+  provider: string;
+  /** Classifier model id, e.g. `jev-latest`. */
   model: string;
   /** Per-request timeout in milliseconds. */
   timeoutMs: number;
@@ -27,8 +31,16 @@ export interface SystemOneConfig {
   thresholds: SystemOneThresholds;
 }
 
+export interface ReadSystemOneOptions {
+  /**
+   * Require `TYPESAFE_API_KEY` as the opt-in signal. Set to `false` for tools
+   * that may use a credential already stored by Pi (for example calibration).
+   */
+  requireApiKey?: boolean;
+}
+
 export const SYSTEM_ONE_DEFAULTS = {
-  baseUrl: "https://api.typesafe.ai",
+  provider: "typesafe",
   model: "jev-latest",
   timeoutMs: 5_000,
   thresholds: {
@@ -42,11 +54,6 @@ export const SYSTEM_ONE_DEFAULTS = {
 export const SYSTEM_ONE_LIMITS = {
   timeoutMs: { min: 100, max: 30_000 },
 } as const;
-
-/** `POST /v1/systemone` on the configured base URL. */
-export function systemOneUrl(baseUrl: string): string {
-  return `${baseUrl.replace(/\/+$/, "")}/v1/systemone`;
-}
 
 function clampInt(
   value: number,
@@ -98,16 +105,25 @@ function resolveThresholds(
  */
 export function readSystemOneConfig(
   env: Record<string, string | undefined> = process.env,
+  options: ReadSystemOneOptions = {},
 ): SystemOneConfig | undefined {
-  const apiKey = env.TYPESAFE_API_KEY?.trim();
-  if (!apiKey) return undefined;
+  const enabled = env.PI_SYSTEM_ONE_ENABLED?.trim();
+  if (enabled === "0") return undefined;
 
-  const baseUrl = env.TYPESAFE_BASE_URL?.trim() || SYSTEM_ONE_DEFAULTS.baseUrl;
-  const model = env.TYPESAFE_DEFAULT_MODEL?.trim() || SYSTEM_ONE_DEFAULTS.model;
+  const hasApiKey = Boolean(env.TYPESAFE_API_KEY?.trim());
+  if (options.requireApiKey !== false && !hasApiKey && enabled !== "1") {
+    return undefined;
+  }
+
+  const provider =
+    env.PI_SYSTEM_ONE_PROVIDER?.trim() || SYSTEM_ONE_DEFAULTS.provider;
+  const model =
+    env.PI_SYSTEM_ONE_MODEL?.trim() ||
+    env.TYPESAFE_DEFAULT_MODEL?.trim() ||
+    SYSTEM_ONE_DEFAULTS.model;
 
   return {
-    baseUrl: baseUrl.replace(/\/+$/, ""),
-    apiKey,
+    provider,
     model,
     timeoutMs: clampInt(
       Number(env.PI_SYSTEM_ONE_TIMEOUT_MS),
