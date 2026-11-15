@@ -114,7 +114,6 @@ function waitForLoopbackEndpoint(child: ChildProcess, timeoutMs: number): Promis
     const timer = setTimeout(() => finish(() => reject(new Error(
       `kubectl proxy did not report a loopback endpoint within ${timeoutMs}ms`,
     ))), timeoutMs);
-    timer.unref?.();
     child.stdout?.on("data", inspect);
     child.stderr?.on("data", inspect);
     child.once("error", onError);

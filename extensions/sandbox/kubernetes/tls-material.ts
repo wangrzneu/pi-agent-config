@@ -1,6 +1,9 @@
 import { spawn } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { isIP } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const OPENSSL = "/usr/bin/openssl";
 const MAX_OPENSSL_OUTPUT_BYTES = 1024 * 1024;
@@ -28,19 +31,41 @@ export async function createKubernetesGatewayTlsMaterial(
   return { key, cert, caData: cert.toString("base64") };
 }
 
-function createSelfSignedCertificate(key: Buffer, ipAddresses: string[]): Promise<Buffer> {
+async function createSelfSignedCertificate(
+  key: Buffer,
+  ipAddresses: string[],
+): Promise<Buffer> {
+  // Use a private temporary directory instead of /dev/stdin and /dev/stdout.
+  // Some Linux CI/container OpenSSL builds cannot open /dev/stdin for a child
+  // process, and writing through the caller's directory would follow
+  // sandbox-controlled symlinks.
+  const directory = await mkdtemp(join(tmpdir(), "pi-kube-tls-"));
+  const keyPath = join(directory, "gateway.key");
+  const certPath = join(directory, "gateway.crt");
+  try {
+    await writeFile(keyPath, key, { mode: 0o600 });
+    await runOpenSsl(keyPath, certPath, ipAddresses);
+    return await readFile(certPath);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+function runOpenSsl(
+  keyPath: string,
+  certPath: string,
+  ipAddresses: string[],
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn(OPENSSL, [
       "req", "-x509", "-new",
-      "-key", "/dev/stdin",
-      "-out", "/dev/stdout",
+      "-key", keyPath,
+      "-out", certPath,
       "-days", "1",
       "-subj", `/CN=${ipAddresses[0]}`,
       "-addext", `subjectAltName=${ipAddresses.map((address) => `IP:${address}`).join(",")}`,
-    ], { shell: false, stdio: ["pipe", "pipe", "pipe"] });
-    const stdout: Buffer[] = [];
+    ], { shell: false, stdio: ["ignore", "ignore", "pipe"] });
     const stderr: Buffer[] = [];
-    let stdoutBytes = 0;
     let stderrBytes = 0;
     let settled = false;
     const fail = (error: Error) => {
@@ -49,15 +74,7 @@ function createSelfSignedCertificate(key: Buffer, ipAddresses: string[]): Promis
       child.kill("SIGKILL");
       reject(error);
     };
-    child.stdout.on("data", (chunk: Buffer) => {
-      stdoutBytes += chunk.length;
-      if (stdoutBytes > MAX_OPENSSL_OUTPUT_BYTES) {
-        fail(new Error("OpenSSL certificate output exceeded the safety limit"));
-      } else {
-        stdout.push(chunk);
-      }
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr?.on("data", (chunk: Buffer) => {
       stderrBytes += chunk.length;
       if (stderrBytes <= MAX_OPENSSL_OUTPUT_BYTES) stderr.push(chunk);
     });
@@ -72,9 +89,7 @@ function createSelfSignedCertificate(key: Buffer, ipAddresses: string[]): Promis
         ));
         return;
       }
-      resolve(Buffer.concat(stdout));
+      resolve();
     });
-    child.stdin.once("error", fail);
-    child.stdin.end(key);
   });
 }

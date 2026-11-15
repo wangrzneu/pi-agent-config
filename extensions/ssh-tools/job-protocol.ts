@@ -148,10 +148,10 @@ exit_code=''
 if [ -s "$job_dir/exit_code" ]; then
   exit_code=$(cat "$job_dir/exit_code")
   if [ -f "$job_dir/cancelled" ]; then state=cancelled; else state=exited; fi
-elif kill -0 "$pid" 2>/dev/null; then
-  state=running
 elif [ -f "$job_dir/cancelled" ]; then
   state=cancelled
+elif kill -0 "$pid" 2>/dev/null; then
+  state=running
 else
   state=lost
 fi
