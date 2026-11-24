@@ -22,6 +22,31 @@ small native adapter for Pi's tool interface.
 The tool is active by default when the package loads. It sends no request until
 the model calls it.
 
+### Configure an API key
+
+An API key is optional. With a key, AnySearch grants higher rate limits.
+
+```bash
+# Set it before starting Pi, or in your shell profile.
+export ANYSEARCH_API_KEY="as_sk_..."
+
+pi
+```
+
+Alternatively, pass it in the environment of a single run:
+
+```bash
+ANYSEARCH_API_KEY="as_sk_..." pi
+```
+
+The extension reads the key when it loads. After changing the environment,
+restart Pi or run `/reload`. It does not read a project `.env` file; use the
+environment variable, or pass `options.apiKey` when embedding
+`registerAnySearch()`.
+
+Create or manage keys at <https://anysearch.com/console/api-keys>. Do not paste
+keys into chat or commit them.
+
 ## Tool
 
 The tool name is `anysearch`; `command` selects the operation.
