@@ -229,6 +229,24 @@ test("configures the shared service from Pi's classifier registry", async () => 
   resetWorkflowService();
 });
 
+async function waitForTraceLines(path, count, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const lines = (await readFile(path, "utf8"))
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      if (lines.length >= count) return lines;
+    } catch {
+      // The writer may not have created the file yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`timed out waiting for ${count} trace lines in ${path}`);
+}
+
 test("writes an optional decision trace", async () => {
   const tracePath = join(
     tmpdir(),
@@ -241,12 +259,7 @@ test("writes an optional decision trace", async () => {
     const service = createWorkflowService({ getClient: () => client });
     await service.decideIntent("trace me");
     await service.decideIntent("trace me");
-    await new Promise((resolve) => setTimeout(resolve, 20));
-
-    const lines = (await readFile(tracePath, "utf8"))
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
+    const lines = await waitForTraceLines(tracePath, 2);
     assert.equal(lines.length, 2);
     assert.deepEqual(
       lines.map((line) => line.cached).sort(),
