@@ -95,13 +95,13 @@ pi --version
 
 ```bash
 # 全局安装
-pi install git:github.com/wangrzneu/pi-agent-config@v0.1.0
+pi install git:github.com/wangrzneu/pi-agent-config@v0.3.0
 
 # 项目级安装（写入 .pi/settings.json）
-pi install -l git:github.com/wangrzneu/pi-agent-config@v0.1.0
+pi install -l git:github.com/wangrzneu/pi-agent-config@v0.3.0
 ```
 
-可以将 `v0.1.0` 替换为任意已发布的 [Release tag](https://github.com/wangrzneu/pi-agent-config/releases)，也可以使用完整的 Git commit SHA。执行 `pi update --extensions` 或 `pi update --all` 不会将固定的 ref 自动升级到新版本。升级已有安装时，请明确安装目标新版本：
+可以将 `v0.3.0` 替换为任意已发布的 [Release tag](https://github.com/wangrzneu/pi-agent-config/releases)，也可以使用完整的 Git commit SHA。执行 `pi update --extensions` 或 `pi update --all` 不会将固定的 ref 自动升级到新版本。升级已有安装时，请明确安装目标新版本：
 
 ```bash
 pi install git:github.com/wangrzneu/pi-agent-config@vX.Y.Z

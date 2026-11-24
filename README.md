@@ -100,13 +100,13 @@ Pin the package to the current stable release so package updates do not unexpect
 
 ```bash
 # Global installation
-pi install git:github.com/wangrzneu/pi-agent-config@v0.1.0
+pi install git:github.com/wangrzneu/pi-agent-config@v0.3.0
 
 # Project installation (writes to .pi/settings.json)
-pi install -l git:github.com/wangrzneu/pi-agent-config@v0.1.0
+pi install -l git:github.com/wangrzneu/pi-agent-config@v0.3.0
 ```
 
-Replace `v0.1.0` with any published [release tag](https://github.com/wangrzneu/pi-agent-config/releases), or with a full Git commit SHA. Pinned refs are not advanced by `pi update --extensions` or `pi update --all`. To upgrade an existing installation, install the desired newer tag explicitly:
+Replace `v0.3.0` with any published [release tag](https://github.com/wangrzneu/pi-agent-config/releases), or with a full Git commit SHA. Pinned refs are not advanced by `pi update --extensions` or `pi update --all`. To upgrade an existing installation, install the desired newer tag explicitly:
 
 ```bash
 pi install git:github.com/wangrzneu/pi-agent-config@vX.Y.Z
