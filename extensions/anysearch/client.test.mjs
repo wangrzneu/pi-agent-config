@@ -141,6 +141,21 @@ test("API errors expose status and request id", async () => {
     (error) => error instanceof AnySearchError
       && error.status === 429
       && error.requestId === "req-1"
-      && /Rate limited/.test(error.message),
+      && /Rate limited/.test(error.message)
+      && /request_id: req-1/.test(error.message),
+  );
+});
+
+test("custom base URL and invalid base URL are handled", async () => {
+  const fake = fakeFetch(() => jsonResponse({ results: [] }));
+  await search(
+    { baseUrl: "https://proxy.example.test/", fetchImpl: fake.fetchImpl },
+    { query: "q" },
+  );
+  assert.equal(fake.calls[0].url, "https://proxy.example.test/v1/search");
+
+  await assert.rejects(
+    search({ baseUrl: "not a url", fetchImpl: fake.fetchImpl }, { query: "q" }),
+    /base URL is invalid/,
   );
 });

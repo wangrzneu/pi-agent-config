@@ -123,7 +123,12 @@ async function request<T>(
   params?: Array<[string, string]>,
 ): Promise<T> {
   const fetchImpl = config.fetchImpl ?? fetch;
-  const url = new URL(`${baseUrl(config)}${path}`);
+  let url: URL;
+  try {
+    url = new URL(`${baseUrl(config)}${path}`);
+  } catch {
+    throw new AnySearchError("AnySearch API base URL is invalid.");
+  }
   for (const [key, value] of params ?? []) url.searchParams.append(key, value);
   const timeout = AbortSignal.timeout(timeoutMs(config));
   const signal = config.signal ? AbortSignal.any([config.signal, timeout]) : timeout;
@@ -149,7 +154,9 @@ async function request<T>(
     });
   }
   if (!response.ok || (body.code !== undefined && body.code !== 0)) {
-    throw new AnySearchError(body.message || `AnySearch request failed (HTTP ${response.status}).`, {
+    const message = body.message || `AnySearch request failed (HTTP ${response.status}).`;
+    const detail = body.request_id ? `${message} (request_id: ${body.request_id})` : message;
+    throw new AnySearchError(detail, {
       status: response.status,
       requestId: body.request_id,
     });
