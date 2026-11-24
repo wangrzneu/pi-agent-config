@@ -29,6 +29,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | 🛡️ **Sandbox** | Fail-closed OS sandbox for local shell commands |
 | 🧠 **External memory** | Opt-in synced-folder memory captured at compaction with two-stage recall |
 | 🧭 **Workflow skill** | Concise default working guidelines |
+| 🔎 **AnySearch** | Native web search, batch search, vertical domain lookup, and page extraction |
 | 🛰️ **Workflow routing** | Opt-in [System One](https://typesafe.ai/blog/introducing-system-one-models-and-jev) decisions that route to the right workflow prompt, flag risky edits, run a pre-completion self-check, and rank candidate files by relevance |
 | 🧩 **Prompts** | On-demand review / debugging / architecture prompts |
 | 📚 **Docs** | Reference docs for exploration, external projects, and security |
@@ -45,6 +46,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | `extensions/sandbox/` | Fail-closed OS sandboxing for local shell commands |
 | `extensions/external-memory/` | Opt-in synced-folder memory captured at compaction with two-stage recall |
 | `extensions/system-one/` | Opt-in System One decision client and workflow routing |
+| `extensions/anysearch/` | Native AnySearch web search and page extraction tool |
 | `skills/pi-workflow/` | Concise default working guidelines |
 | `prompts/` | On-demand prompts for review, debugging, and architecture tasks |
 | `bench/` | Paired A/B runner and analysis for System One |
@@ -74,6 +76,7 @@ A curated set of extensions, skills, and prompts that make Pi **safer**, **more 
 | `docs/exploration.md` | Code exploration guidance |
 | `docs/external-projects.md` | Working with external projects |
 | `docs/system-one.md` | System One decisions: routing, change risk, completion self-check, context selection, and calibration |
+| `docs/anysearch.md` | AnySearch setup, tool commands, vertical domains, and security notes |
 | `docs/ab-testing.md` | Paired A/B runner, task schema, metrics, and analysis |
 | `docs/improvement-plan.md` | Review findings and P0/P1/P2/P3 roadmap |
 
@@ -286,6 +289,8 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
   (at most once per user prompt). A `context_select` tool ranks candidate files by relevance on demand.
   `/system-one on|off` toggles all of it at runtime; configuration is
   re-resolved at session start.
+- AnySearch registers one tool and sends no request until the model calls it. It runs in the Pi
+  process and is not covered by the local bash sandbox's network allowlist.
 - Each `/btw` question uses a separate model loop with a small output and tool-call budget. Read-only
   tool results stay ephemeral and the exchange is not stored in the session.
 - The Markdown viewer, directory navigation, search, images, and Mermaid rendering are processed only

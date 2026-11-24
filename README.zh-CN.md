@@ -29,6 +29,7 @@
 | 🛡️ **沙箱** | 对本地 shell 命令实施 fail-closed 的操作系统级沙箱 |
 | 🧠 **外部记忆** | 可选的项目级同步目录记忆，压缩时捕获、两阶段召回 |
 | 🧭 **工作流 skill** | 精简的默认工作规范 |
+| 🔎 **AnySearch** | 原生网页搜索、批量搜索、垂直领域查询与页面正文提取 |
 | 🛰️ **工作流路由** | 可选的 [System One](https://typesafe.ai/blog/introducing-system-one-models-and-jev) 决策：路由到正确的工作流提示词、标记高风险改动、在完成前做自检，并按相关性排序候选文件 |
 | 🧩 **提示词** | 按需使用的 review / debugging / architecture 提示词 |
 | 📚 **文档** | 代码探索、外部项目与安全边界参考文档 |
@@ -45,6 +46,7 @@
 | `extensions/sandbox/` | 对本地 shell 命令实施 fail-closed 的操作系统级沙箱 |
 | `extensions/external-memory/` | 可选的项目级同步目录记忆，压缩时捕获、两阶段召回 |
 | `extensions/system-one/` | 可选的 System One 决策客户端与工作流路由 |
+| `extensions/anysearch/` | 原生 AnySearch 网页搜索与页面正文提取工具 |
 | `skills/pi-workflow/` | 精简的默认工作规范 |
 | `prompts/` | 按需使用的 review、debugging 和 architecture 提示词 |
 | `bench/` | System One 的配对 A/B 运行器与分析脚本 |
@@ -69,6 +71,7 @@
 | `docs/exploration.md` | 代码探索指引 |
 | `docs/external-projects.md` | 处理外部项目 |
 | `docs/system-one.md` | System One 决策：路由、变更风险、完成自检、上下文筛选与校准 |
+| `docs/anysearch.md` | AnySearch 配置、工具命令、垂直领域与安全说明 |
 | `docs/ab-testing.md` | 配对 A/B 运行器、任务格式、指标与分析 |
 | `docs/improvement-plan.md` | Review 发现与 P0/P1/P2/P3 路线图 |
 
@@ -270,6 +273,7 @@ pi remove -l git:github.com/wangrzneu/pi-agent-config
   流程（每个用户提示最多一次）。另外提供 `context_select` 工具，按相关性排序候选文件。
   `/system-one on|off` 可在运行时同时开关这些功能；配置会在
   每次会话开始时重新解析。
+- AnySearch 只注册一个工具，模型调用前不会发起请求；它运行在 Pi 进程中，不受本地 bash 沙箱网络白名单约束。
 - 每个 `/btw` 问题会运行一个带有较小输出与工具调用预算的独立模型循环；只读工具结果是临时的，
   问答不会写入会话。
 - Markdown 阅读器、目录、搜索、图片和 Mermaid 都只在 TUI 扩展进程中处理，不会把内容加入模型

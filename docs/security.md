@@ -45,6 +45,18 @@ The allowlist should stay narrow. New commands or flags require tests showing bo
 - Up to 20 successful exchanges remain in process memory for history navigation. They are discarded on reload, session replacement, exit, or explicit `x` clearing.
 - Copying an answer to the system clipboard is always user-initiated with `c`.
 
+## AnySearch
+
+- The native `anysearch` tool sends queries, URLs, and an optional API key to
+  `ANYSEARCH_API_BASE_URL` (default `https://api.anysearch.com`) from the Pi
+  process. It is not covered by the local bash sandbox's network allowlist.
+- Never send secrets, private code, or personal data unless you trust the
+  provider and endpoint. Prefer a proxy or self-hosted endpoint when needed.
+- Extracted page content is untrusted external data; the tool output includes a
+  warning and the model must not follow instructions embedded in it.
+- `ANYSEARCH_API_KEY` is optional. Anonymous access has lower limits. Do not
+  paste keys into chat or commit them.
+
 ## SSH tools
 
 - A host and each requested capability group must be explicitly authorized once per session. Grants persist until `/ssh-tools off|reset` revokes them and fail closed in print and RPC modes.
